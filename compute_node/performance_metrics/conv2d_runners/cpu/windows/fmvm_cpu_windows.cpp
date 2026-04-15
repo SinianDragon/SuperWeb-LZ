@@ -6,6 +6,7 @@
  *   2. Loop order: kh -> kw -> ic -> oc (input reuse + auto-vectorizable inner loop)
  *   3. Real autotune: sweeps all worker counts, picks fastest
  *   4. Supports --start-oc / --end-oc for distributed slice computation
+ *   5. Adaptive timing: auto-increases repeats on fast hardware for accurate measurement
  *
  * Compile: cl /nologo /std:c++20 /O2 /fp:fast /MT /EHsc /Fe:fmvm_cpu_windows.exe fmvm_cpu_windows.cpp
  */
@@ -24,6 +25,13 @@
 #include <functional>
 
 using namespace std;
+
+// Minimum total elapsed time (in seconds) for a timing measurement to be
+// considered reliable.  When the CPU finishes faster than this, we double
+// the repeat count and re-measure.
+static constexpr double MIN_RELIABLE_TIME_SEC = 0.05;  // 50 ms
+// Maximum number of adaptive doublings to prevent infinite loops.
+static constexpr int    MAX_ADAPTIVE_DOUBLINGS = 8;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -132,13 +140,35 @@ void run_multithreaded(const float* input, const float* weight_t, float* output,
     for (auto& th : threads) th.join();
 }
 
-// ─── Timing Helper ────────────────────────────────────────────────────────────
+// ─── Adaptive Timing Helper ──────────────────────────────────────────────────
+// Runs the computation `repeats` times, measures total elapsed.  If the total
+// time is below MIN_RELIABLE_TIME_SEC, doubles repeats and retries so that
+// the per-iteration time is computed from a reliable measurement window.
 
-double time_run(function<void()> fn, int repeats) {
-    auto t1 = chrono::high_resolution_clock::now();
-    for (int i = 0; i < repeats; ++i) fn();
-    auto t2 = chrono::high_resolution_clock::now();
-    return chrono::duration<double>(t2 - t1).count() / repeats;
+struct TimingResult {
+    double total_sec;
+    int    actual_repeats;
+    double per_iter_sec;
+};
+
+TimingResult adaptive_time_run(function<void()> fn, int initial_repeats) {
+    int repeats = initial_repeats;
+
+    for (int attempt = 0; attempt < MAX_ADAPTIVE_DOUBLINGS; ++attempt) {
+        auto t1 = chrono::high_resolution_clock::now();
+        for (int i = 0; i < repeats; ++i) fn();
+        auto t2 = chrono::high_resolution_clock::now();
+        double total = chrono::duration<double>(t2 - t1).count();
+
+        if (total >= MIN_RELIABLE_TIME_SEC || attempt == MAX_ADAPTIVE_DOUBLINGS - 1) {
+            return { total, repeats, total / repeats };
+        }
+
+        // Too fast — double repeats and retry
+        repeats *= 2;
+    }
+
+    return { 0.0, repeats, 0.0 };
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -197,22 +227,24 @@ int main(int argc, char** argv) {
     double best_autotune_time = 1e30;
 
     for (int w_count : workers) {
-        double elapsed = time_run([&]() {
+        TimingResult tr = adaptive_time_run([&]() {
             run_multithreaded(input_data.data(), weight_t.data(), output_data.data(),
                               h, w, c_in, slice_c_out, k, pad, out_h, out_w, w_count);
         }, autotune_repeats);
 
-        if (elapsed < best_autotune_time) {
-            best_autotune_time = elapsed;
+        if (tr.per_iter_sec < best_autotune_time) {
+            best_autotune_time = tr.per_iter_sec;
             best_worker = w_count;
         }
     }
 
     // ─── Measurement: run with best config ────────────────────────────────
-    double measure_time = time_run([&]() {
+    TimingResult measure_tr = adaptive_time_run([&]() {
         run_multithreaded(input_data.data(), weight_t.data(), output_data.data(),
                           h, w, c_in, slice_c_out, k, pad, out_h, out_w, best_worker);
     }, measurement_repeats);
+
+    double measure_time = measure_tr.per_iter_sec;
 
     // ─── Write output file if requested ────────────────────────────────
     if (!output_path.empty()) {
@@ -227,6 +259,10 @@ int main(int argc, char** argv) {
 
     int best_tile = tile_sizes.empty() ? 1 : tile_sizes[0];
 
+    // Guard against division by zero
+    double autotune_gflops = (best_autotune_time > 0) ? (flops_per_run / best_autotune_time / 1e9) : 0.0;
+    double measure_gflops  = (measure_time > 0)       ? (flops_per_run / measure_time / 1e9)       : 0.0;
+
     cout << "{\n"
          << "  \"actual_workers\": " << best_worker << ",\n"
          << "  \"requested_workers\": " << workers[0] << ",\n"
@@ -235,10 +271,10 @@ int main(int argc, char** argv) {
          << "  \"measurement_repeats\": " << measurement_repeats << ",\n"
          << "  \"trials_run\": " << workers.size() << ",\n"
          << "  \"autotune_wall_clock_latency_seconds\": " << fixed << setprecision(9) << best_autotune_time << ",\n"
-         << "  \"autotune_effective_gflops\": " << (flops_per_run / best_autotune_time / 1e9) << ",\n"
+         << "  \"autotune_effective_gflops\": " << autotune_gflops << ",\n"
          << "  \"autotune_checksum\": \"" << checksum << "\",\n"
          << "  \"measurement_wall_clock_latency_seconds\": " << fixed << setprecision(9) << measure_time << ",\n"
-         << "  \"measurement_effective_gflops\": " << (flops_per_run / measure_time / 1e9) << ",\n"
+         << "  \"measurement_effective_gflops\": " << measure_gflops << ",\n"
          << "  \"measurement_checksum\": \"" << checksum << "\"\n"
          << "}\n";
 

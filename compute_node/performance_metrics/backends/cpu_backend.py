@@ -200,10 +200,22 @@ class CpuBackend:
             "--measurement-repeats", str(measurement_repeats),
         ]
 
+        # Generous timeout: autotune sweeps N worker configs × N tile sizes × repeats.
+        # On slow CPUs this can take several minutes.
+        num_trials = len(worker_candidates) * len(tile_candidates)
+        subprocess_timeout = max(time_budget_seconds * 20, num_trials * 30.0, 180.0)
+
         try:
-            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=max(time_budget_seconds, 30.0), cwd=ROOT_DIR)
+            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=subprocess_timeout, cwd=ROOT_DIR)
+        except subprocess.TimeoutExpired:
+            notes.append(f"CPU benchmark timed out after {subprocess_timeout:.0f}s (tried {num_trials} configs)")
+            return BackendResult(self.name, True, None, None, None, [], notes)
+        except subprocess.CalledProcessError as exc:
+            stderr_snippet = (exc.stderr or "")[:300].strip()
+            notes.append(f"CPU runner process failed (exit code {exc.returncode}): {stderr_snippet}")
+            return BackendResult(self.name, False, None, None, None, [], notes)
         except Exception as exc:
-            notes.append("CPU benchmark failed or timed out")
+            notes.append(f"CPU benchmark failed: {exc}")
             return BackendResult(self.name, False, None, None, None, [], notes)
 
         metrics = json.loads(completed.stdout)

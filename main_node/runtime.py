@@ -19,14 +19,14 @@ from common.cluster_protocol import (
 )
 from compute_node.executor import run_computation, _get_best_gflops
 from compute_node.performance_metrics.workloads import get_runtime_spec
+from constants import DEFAULT_TCP_PORT
 from main_node.aggregator import merge_output_slices, save_output
 from main_node.dispatcher import TaskDispatcher
 from main_node.registry import ClusterRegistry
 
 logger = logging.getLogger("superweb_cluster")
 
-DEFAULT_TCP_PORT = 9800
-WORKER_ACCEPT_TIMEOUT = 15  # seconds to wait for workers after discovery
+WORKER_ACCEPT_TIMEOUT = 30  # seconds to wait for workers after discovery
 
 
 class MainNodeRuntime:

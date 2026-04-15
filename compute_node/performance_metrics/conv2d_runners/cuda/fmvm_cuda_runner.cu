@@ -7,6 +7,7 @@
  *   3. General kernel for arbitrary K values
  *   4. Real autotune: sweeps tile sizes (block dims), picks fastest
  *   5. Proper use of --block-sizes parameter
+ *   6. Adaptive timing: auto-increases repeats when GPU is too fast for accurate measurement
  *
  * Compile: nvcc -std=c++17 -O3 -o fmvm_cuda_runner fmvm_cuda_runner.cu
  */
@@ -33,6 +34,13 @@ using namespace std;
             exit(EXIT_FAILURE); \
         } \
     } while (0)
+
+// Minimum total elapsed time (in ms) for a timing measurement to be considered
+// reliable.  When the GPU finishes faster than this, we automatically double
+// the repeat count and re-measure.
+static constexpr float MIN_RELIABLE_TIME_MS = 10.0f;
+// Maximum number of adaptive doublings to prevent infinite loops.
+static constexpr int   MAX_ADAPTIVE_DOUBLINGS = 8;
 
 // ─── Shared-Memory Tiled Conv2D Kernel (General K) ────────────────────────────
 //
@@ -200,6 +208,56 @@ void launch_kernel(int k, dim3 grid, dim3 block, int smem_bytes,
     }
 }
 
+// ─── Adaptive Timing Helper ───────────────────────────────────────────────────
+// Runs the kernel `repeats` times, measures total elapsed ms.  If the total
+// time is below MIN_RELIABLE_TIME_MS, doubles repeats and retries — up to
+// MAX_ADAPTIVE_DOUBLINGS times — so that the per-iteration time is computed
+// from a long-enough measurement window to avoid float-precision artifacts.
+
+struct TimingResult {
+    float   total_ms;       // total elapsed across all repeats
+    int     actual_repeats; // repeats actually used (may be > initial)
+    double  per_iter_sec;   // total_ms / 1000.0 / actual_repeats
+};
+
+TimingResult adaptive_time_kernel(
+        int k, dim3 grid, dim3 block, int smem_bytes,
+        const float* d_input, const float* d_weight, float* d_output,
+        int h, int w, int c_in, int c_out, int pad, int out_h, int out_w,
+        cudaEvent_t ev_start, cudaEvent_t ev_stop,
+        int initial_repeats)
+{
+    int repeats = initial_repeats;
+
+    for (int attempt = 0; attempt < MAX_ADAPTIVE_DOUBLINGS; ++attempt) {
+        // Warmup
+        launch_kernel(k, grid, block, smem_bytes, d_input, d_weight, d_output,
+                      h, w, c_in, c_out, pad, out_h, out_w);
+        CUDA_CHECK(cudaDeviceSynchronize());
+
+        CUDA_CHECK(cudaEventRecord(ev_start));
+        for (int r = 0; r < repeats; ++r) {
+            launch_kernel(k, grid, block, smem_bytes, d_input, d_weight, d_output,
+                          h, w, c_in, c_out, pad, out_h, out_w);
+        }
+        CUDA_CHECK(cudaEventRecord(ev_stop));
+        CUDA_CHECK(cudaEventSynchronize(ev_stop));
+
+        float ms = 0;
+        cudaEventElapsedTime(&ms, ev_start, ev_stop);
+
+        if (ms >= MIN_RELIABLE_TIME_MS || attempt == MAX_ADAPTIVE_DOUBLINGS - 1) {
+            return { ms, repeats, (double)ms / 1000.0 / (double)repeats };
+        }
+
+        // Too fast — double repeats and retry
+        repeats *= 2;
+    }
+
+    // Should not reach here, but just in case
+    return { 0.0f, repeats, 0.0 };
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 int main(int argc, char** argv) {
@@ -260,7 +318,7 @@ int main(int argc, char** argv) {
     };
 
     TileConfig best_cfg = candidates[0];
-    float best_ms = FLT_MAX;
+    double best_per_iter = 1e30;
 
     for (auto& cfg : candidates) {
         dim3 block(cfg.tw, cfg.th);
@@ -269,33 +327,21 @@ int main(int argc, char** argv) {
                   c_out);
         int smem_bytes = (cfg.th + k - 1) * (cfg.tw + k - 1) * (int)sizeof(float);
 
-        // Warmup
-        launch_kernel(k, grid, block, smem_bytes, d_input, d_weight, d_output,
-                      h, w, c_in, c_out, pad, out_h, out_w);
-        CUDA_CHECK(cudaDeviceSynchronize());
+        TimingResult tr = adaptive_time_kernel(
+            k, grid, block, smem_bytes, d_input, d_weight, d_output,
+            h, w, c_in, c_out, pad, out_h, out_w,
+            ev_start, ev_stop, autotune_repeats);
 
-        // Time
-        CUDA_CHECK(cudaEventRecord(ev_start));
-        for (int r = 0; r < autotune_repeats; ++r) {
-            launch_kernel(k, grid, block, smem_bytes, d_input, d_weight, d_output,
-                          h, w, c_in, c_out, pad, out_h, out_w);
-        }
-        CUDA_CHECK(cudaEventRecord(ev_stop));
-        CUDA_CHECK(cudaEventSynchronize(ev_stop));
-
-        float ms = 0;
-        cudaEventElapsedTime(&ms, ev_start, ev_stop);
-        cfg.ms = ms / autotune_repeats;
-
-        if (cfg.ms < best_ms) {
-            best_ms = cfg.ms;
+        if (tr.per_iter_sec < best_per_iter) {
+            best_per_iter = tr.per_iter_sec;
             best_cfg = cfg;
         }
     }
 
-    double autotune_time = best_ms / 1000.0;
+    double autotune_time = best_per_iter;
 
     // ─── Measurement: run with best config ────────────────────────────────
+    double measure_time;
     {
         dim3 block(best_cfg.tw, best_cfg.th);
         dim3 grid((out_w + best_cfg.tw - 1) / best_cfg.tw,
@@ -303,18 +349,13 @@ int main(int argc, char** argv) {
                   c_out);
         int smem_bytes = (best_cfg.th + k - 1) * (best_cfg.tw + k - 1) * (int)sizeof(float);
 
-        CUDA_CHECK(cudaEventRecord(ev_start));
-        for (int r = 0; r < measurement_repeats; ++r) {
-            launch_kernel(k, grid, block, smem_bytes, d_input, d_weight, d_output,
-                          h, w, c_in, c_out, pad, out_h, out_w);
-        }
-        CUDA_CHECK(cudaEventRecord(ev_stop));
-        CUDA_CHECK(cudaEventSynchronize(ev_stop));
-    }
+        TimingResult tr = adaptive_time_kernel(
+            k, grid, block, smem_bytes, d_input, d_weight, d_output,
+            h, w, c_in, c_out, pad, out_h, out_w,
+            ev_start, ev_stop, measurement_repeats);
 
-    float ms_measure = 0;
-    cudaEventElapsedTime(&ms_measure, ev_start, ev_stop);
-    double measure_time = (ms_measure / 1000.0) / measurement_repeats;
+        measure_time = tr.per_iter_sec;
+    }
 
     // ─── Copy output back to host ─────────────────────────────────────────
     CUDA_CHECK(cudaMemcpy(h_output.data(), d_output, output_size * sizeof(float), cudaMemcpyDeviceToHost));
@@ -332,6 +373,10 @@ int main(int argc, char** argv) {
     int best_block = best_cfg.tw * best_cfg.th;
     int best_tile = tile_sizes.empty() ? best_cfg.tw : tile_sizes[0];
 
+    // Guard against division by zero (should not happen with adaptive timing)
+    double autotune_gflops = (autotune_time > 0) ? (flops_per_run / autotune_time / 1e9) : 0.0;
+    double measure_gflops  = (measure_time > 0)  ? (flops_per_run / measure_time  / 1e9) : 0.0;
+
     cout << "{\n"
          << "  \"transpose\": 0,\n"
          << "  \"block_size\": " << best_block << ",\n"
@@ -340,10 +385,10 @@ int main(int argc, char** argv) {
          << "  \"measurement_repeats\": " << measurement_repeats << ",\n"
          << "  \"trials_run\": " << candidates.size() << ",\n"
          << "  \"autotune_wall_clock_latency_seconds\": " << fixed << setprecision(9) << autotune_time << ",\n"
-         << "  \"autotune_effective_gflops\": " << (flops_per_run / autotune_time / 1e9) << ",\n"
+         << "  \"autotune_effective_gflops\": " << autotune_gflops << ",\n"
          << "  \"autotune_checksum\": \"" << checksum << "\",\n"
          << "  \"measurement_wall_clock_latency_seconds\": " << fixed << setprecision(9) << measure_time << ",\n"
-         << "  \"measurement_effective_gflops\": " << (flops_per_run / measure_time / 1e9) << ",\n"
+         << "  \"measurement_effective_gflops\": " << measure_gflops << ",\n"
          << "  \"measurement_checksum\": \"" << checksum << "\"\n"
          << "}\n";
 

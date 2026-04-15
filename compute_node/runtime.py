@@ -15,10 +15,9 @@ from common.cluster_protocol import (
     send_json, send_binary, recv_msg,
 )
 from compute_node.executor import run_computation, _get_best_backend, _get_best_gflops
+from constants import DEFAULT_TCP_PORT
 
 logger = logging.getLogger("superweb_cluster")
-
-DEFAULT_TCP_PORT = 9800
 
 
 class ComputeNodeRuntime:

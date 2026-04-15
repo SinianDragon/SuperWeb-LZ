@@ -108,12 +108,38 @@ class CudaBackend:
             "--measurement-repeats", str(_measurement_repeats(spec)),
         ]
 
+        # Generous timeout for CUDA autotune sweeps
+        subprocess_timeout = max(time_budget_seconds * 20, 180.0)
+
         try:
-            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=max(time_budget_seconds, 30.0), cwd=ROOT_DIR)
+            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=subprocess_timeout, cwd=ROOT_DIR)
             metrics = json.loads(completed.stdout)
-        except Exception as exc:
-            notes.append("CUDA benchmark failed or timed out")
+        except subprocess.TimeoutExpired:
+            notes.append(f"CUDA benchmark timed out after {subprocess_timeout:.0f}s")
+            return BackendResult(self.name, True, None, None, None, [], notes)
+        except subprocess.CalledProcessError as exc:
+            stderr_snippet = (exc.stderr or "")[:300].strip()
+            notes.append(f"CUDA runner process failed (exit code {exc.returncode}): {stderr_snippet}")
             return BackendResult(self.name, False, None, None, None, [], notes)
+        except json.JSONDecodeError:
+            notes.append("CUDA runner produced invalid JSON output")
+            return BackendResult(self.name, False, None, None, None, [], notes)
+        except Exception as exc:
+            notes.append(f"CUDA benchmark failed: {exc}")
+            return BackendResult(self.name, False, None, None, None, [], notes)
+
+        # ─── GFLOPS sanity check ──────────────────────────────────────────
+        # Even the fastest consumer GPU (RTX 4090) peaks at ~83 TFLOPS FP32.
+        # If the reported value exceeds 100,000 GFLOPS, the timing was
+        # unreliable (likely a sub-microsecond measurement artifact).
+        MAX_SANE_GFLOPS = 100_000.0
+        for key in ("autotune_effective_gflops", "measurement_effective_gflops"):
+            raw = float(metrics.get(key, 0))
+            if raw > MAX_SANE_GFLOPS:
+                notes.append(f"WARNING: {key}={raw:.0f} exceeds sanity limit "
+                             f"({MAX_SANE_GFLOPS:.0f}), clamping to 0. "
+                             "Timing was likely too short for reliable measurement.")
+                metrics[key] = 0.0
 
         autotune_score = linear_time_score(
             float(metrics["autotune_wall_clock_latency_seconds"]),

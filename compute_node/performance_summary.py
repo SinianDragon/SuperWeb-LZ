@@ -16,15 +16,23 @@ def load_performance_summary(result_path: Path | None = None) -> ComputePerforma
 
     payload = json.loads(resolved_path.read_text(encoding="utf-8"))
     backend_results = payload.get("backend_results", {})
+    ranking_order = payload.get("ranking", [])
 
     ranked_hardware: list[ComputeHardwarePerformance] = []
     for name, data in backend_results.items():
-        if data.get("available") and data.get("best_result"):
+        # result.json uses "best_trial" (not "best_result")
+        best = data.get("best_trial") or data.get("best_result") or {}
+        if data.get("available") and best.get("effective_gflops"):
+            # Derive rank from the "ranking" list order (1-based)
+            try:
+                rank = ranking_order.index(name) + 1
+            except ValueError:
+                rank = 99
             ranked_hardware.append(
                 ComputeHardwarePerformance(
                     hardware_type=name,
-                    effective_gflops=float(data["best_result"]["effective_gflops"]),
-                    rank=int(data.get("rank") or 99),
+                    effective_gflops=float(best["effective_gflops"]),
+                    rank=rank,
                 )
             )
 
