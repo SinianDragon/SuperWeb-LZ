@@ -61,7 +61,7 @@ def ensure_data_generated(role: str, logger):
     """Generate test + runtime data files if they don't already exist."""
     import subprocess
 
-    gen_dir = ROOT_DIR / "compute_node" / "input matrix" / "generated"
+    gen_dir = ROOT_DIR / "compute_node" / "dataset" / "generated"
     gen_dir.mkdir(parents=True, exist_ok=True)
 
     # Check what already exists
@@ -80,7 +80,7 @@ def ensure_data_generated(role: str, logger):
 
     logger.info(f"Generating data files for role: {role}")
     subprocess.run(
-        [sys.executable, str(ROOT_DIR / "compute_node" / "input matrix" / "generate.py"),
+        [sys.executable, str(ROOT_DIR / "compute_node" / "dataset" / "generate.py"),
          "--output-dir", str(gen_dir),
          "--role", role],
         check=True, cwd=str(ROOT_DIR),
@@ -195,7 +195,7 @@ def main():
     print_summary(result, logger)
 
     # Save result to file
-    result_path = ROOT_DIR / "compute_node" / "input matrix" / "generated" / "execution_result.json"
+    result_path = ROOT_DIR / "compute_node" / "dataset" / "generated" / "execution_result.json"
     result_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
     logger.info(f"Result saved to {result_path}")
 

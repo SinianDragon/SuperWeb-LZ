@@ -26,7 +26,7 @@ class TaskDispatcher:
     def run_locally(self) -> dict:
         """Execute the full computation locally using the best backend."""
         spec = self.runtime_spec
-        dataset_dir = self.root / "compute_node" / "input matrix" / "generated"
+        dataset_dir = self.root / "compute_node" / "dataset" / "generated"
         input_path = dataset_dir / "runtime_input.bin"
         weight_path = dataset_dir / "runtime_weight.bin"
         output_path = dataset_dir / "runtime_output.bin"

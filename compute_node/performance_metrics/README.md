@@ -31,7 +31,7 @@ The current flow is:
 
 The benchmark currently measures one method:
 
-- `fixed_matrix_vector_multiplication`
+- `Conv2D`
 
 The default fixed problem is:
 
@@ -78,15 +78,15 @@ The fixed FMVM workload now runs in two stages:
   - CUDA backend adapter
 - `backends/metal_backend.py`
   - Metal backend adapter
-- `fixed_matrix_vector_multiplication/cpu/windows/fmvm_cpu_windows.cpp`
+- `conv2d_runners/cpu/windows/fmvm_cpu_windows.cpp`
   - Windows CPU compute runner
-- `fixed_matrix_vector_multiplication/cpu/macos/fmvm_cpu_macos.cpp`
+- `conv2d_runners/cpu/macos/fmvm_cpu_macos.cpp`
   - macOS CPU compute runner
-- `fixed_matrix_vector_multiplication/cuda/fmvm_cuda_runner.cu`
+- `conv2d_runners/cuda/fmvm_cuda_runner.cu`
   - CUDA compute runner
-- `fixed_matrix_vector_multiplication/metal/fmvm_metal_runner.mm`
+- `conv2d_runners/metal/fmvm_metal_runner.mm`
   - Metal host runner
-- `fixed_matrix_vector_multiplication/metal/fmvm_metal_kernels.metal`
+- `conv2d_runners/metal/fmvm_metal_kernels.metal`
   - Metal compute kernel
 
 ## Backends
@@ -195,7 +195,7 @@ python "compute_node/performance_metrics/benchmark.py" --backend metal
 Generate the dataset without running the benchmark:
 
 ```bash
-python "compute_node/input matrix/generate.py"
+python "compute_node/dataset/generate.py"
 ```
 
 Write the report to a different path:
@@ -213,7 +213,7 @@ python "compute_node/performance_metrics/benchmark.py" --rebuild
 
 `--rows` and `--cols` remain available for tiny tests. When you use those
 overrides without changing `--dataset-dir`, the generated files are written to
-`compute_node/input matrix/generated/overrides/<rows>x<cols>/` so the main
+`compute_node/dataset/generated/overrides/<rows>x<cols>/` so the main
 production dataset does not get overwritten.
 
 ## Notes

@@ -10,18 +10,18 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
-!compute_node/performance_metrics/fixed_matrix_vector_multiplication/cpu/macos/build/
-compute_node/performance_metrics/fixed_matrix_vector_multiplication/cpu/macos/build/*
-!compute_node/performance_metrics/fixed_matrix_vector_multiplication/cpu/macos/build/fmvm_cpu_macos
-!compute_node/performance_metrics/fixed_matrix_vector_multiplication/cpu/windows/build/
-compute_node/performance_metrics/fixed_matrix_vector_multiplication/cpu/windows/build/*
-!compute_node/performance_metrics/fixed_matrix_vector_multiplication/cpu/windows/build/fmvm_cpu_windows.exe
-!compute_node/performance_metrics/fixed_matrix_vector_multiplication/cuda/build/
-compute_node/performance_metrics/fixed_matrix_vector_multiplication/cuda/build/*
-!compute_node/performance_metrics/fixed_matrix_vector_multiplication/cuda/build/fmvm_cuda_runner.exe
-!compute_node/performance_metrics/fixed_matrix_vector_multiplication/metal/build/
-compute_node/performance_metrics/fixed_matrix_vector_multiplication/metal/build/*
-!compute_node/performance_metrics/fixed_matrix_vector_multiplication/metal/build/fmvm_metal_runner
+!compute_node/performance_metrics/conv2d_runners/cpu/macos/build/
+compute_node/performance_metrics/conv2d_runners/cpu/macos/build/*
+!compute_node/performance_metrics/conv2d_runners/cpu/macos/build/fmvm_cpu_macos
+!compute_node/performance_metrics/conv2d_runners/cpu/windows/build/
+compute_node/performance_metrics/conv2d_runners/cpu/windows/build/*
+!compute_node/performance_metrics/conv2d_runners/cpu/windows/build/fmvm_cpu_windows.exe
+!compute_node/performance_metrics/conv2d_runners/cuda/build/
+compute_node/performance_metrics/conv2d_runners/cuda/build/*
+!compute_node/performance_metrics/conv2d_runners/cuda/build/fmvm_cuda_runner.exe
+!compute_node/performance_metrics/conv2d_runners/metal/build/
+compute_node/performance_metrics/conv2d_runners/metal/build/*
+!compute_node/performance_metrics/conv2d_runners/metal/build/fmvm_metal_runner
 develop-eggs/
 dist/
 downloads/
@@ -226,7 +226,7 @@ __marimo__/
 
 # Performance metrics generated artifacts
 /compute_node/performance_metrics/result.json
-/compute_node/input matrix/generated/
+/compute_node/dataset/generated/
 /compute_node/performance_metrics/**/*.obj
 /compute_node/performance_metrics/**/*.ilk
 /compute_node/performance_metrics/**/*.pdb

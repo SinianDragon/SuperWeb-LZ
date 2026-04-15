@@ -38,7 +38,7 @@ class MainNodeRuntime:
         self.dispatcher = TaskDispatcher(self.registry, logger)
         self.spec = get_runtime_spec()
         self.root = Path(__file__).resolve().parent.parent
-        self.dataset_dir = self.root / "compute_node" / "input matrix" / "generated"
+        self.dataset_dir = self.root / "compute_node" / "dataset" / "generated"
         self._stop_event = threading.Event()
 
     def run(self) -> dict:

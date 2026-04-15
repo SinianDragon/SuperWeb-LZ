@@ -21,7 +21,7 @@ from path_utils import to_relative_cli_path
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Benchmark backends.")
     parser.add_argument("--backend", action="append", default=None)
-    parser.add_argument("--dataset-dir", type=Path, default=ROOT_DIR.parent / "input matrix" / "generated")
+    parser.add_argument("--dataset-dir", type=Path, default=ROOT_DIR.parent / "dataset" / "generated")
     parser.add_argument("--output", type=Path, default=ROOT_DIR / "result.json")
     parser.add_argument("--role", choices=("compute", "main"), default="compute")
     parser.add_argument("--h", type=int)
@@ -48,7 +48,7 @@ def _generate_if_needed(dataset_dir: Path, spec, role: str) -> None:
         needs_gen = True
 
     if needs_gen:
-        script = ROOT_DIR.parent / "input matrix" / "generate.py"
+        script = ROOT_DIR.parent / "dataset" / "generate.py"
         cmd = [sys.executable, str(script), "--output-dir", str(dataset_dir), "--role", role]
         if spec.h:
             cmd.extend(["--h", str(spec.h), "--w", str(spec.w)])

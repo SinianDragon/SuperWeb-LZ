@@ -31,7 +31,7 @@ except ImportError:
     from compute_node.performance_metrics.scoring import linear_time_score
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-METAL_DIR = ROOT_DIR / "fixed_matrix_vector_multiplication" / "metal"
+METAL_DIR = ROOT_DIR / "conv2d_runners" / "metal"
 METAL_HOST_SOURCE_PATH = METAL_DIR / "fmvm_metal_runner.mm"
 METAL_KERNEL_SOURCE_PATH = METAL_DIR / "fmvm_metal_kernels.metal"
 METAL_BUILD_DIR = METAL_DIR / "build"

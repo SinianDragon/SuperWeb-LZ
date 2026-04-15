@@ -33,7 +33,7 @@ except ImportError:
     from compute_node.performance_metrics.scoring import linear_time_score
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-CUDA_DIR = ROOT_DIR / "fixed_matrix_vector_multiplication" / "cuda"
+CUDA_DIR = ROOT_DIR / "conv2d_runners" / "cuda"
 CUDA_SOURCE_PATH = CUDA_DIR / "fmvm_cuda_runner.cu"
 CUDA_BUILD_DIR = CUDA_DIR / "build"
 CUDA_EXECUTABLE_PATH = CUDA_BUILD_DIR / ("fmvm_cuda_runner.exe" if os.name == "nt" else "fmvm_cuda_runner")

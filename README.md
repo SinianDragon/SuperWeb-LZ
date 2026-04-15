@@ -1,20 +1,20 @@
 # SuperWeb Cluster
 
-基于局域网的分布式 Conv2D 卷积计算集群。多台机器通过 mDNS 自动发现、TCP 协调，协同完成大规模 2D 卷积任务，并将计算结果聚合到主节点。
+LAN-based distributed Conv2D computation cluster. Multiple machines auto-discover each other via mDNS, coordinate over TCP, collaboratively execute large-scale 2D convolution workloads, and aggregate results on the main node.
 
-## 功能概览
+## Features
 
-| 能力 | 说明 |
-|------|------|
-| **自动发现** | 基于 mDNS (DNS-SD) 的零配置 LAN 组网，无需手动填写 IP |
-| **硬件基准测试** | 启动时自动探测 CPU / CUDA / Metal 后端性能并排名 |
-| **GFLOPS 感知调度** | 根据各节点跑分结果按算力比例分配工作量 |
-| **分布式 Conv2D** | 将完整卷积核(weight)按输出通道 `C_out` 维度切片下发，各节点并行计算 |
-| **确定性数据** | 输入特征图(input matrix)使用固定种子 PRNG 生成，所有节点结果逐字节一致 |
-| **多后端支持** | 原生 C++ CPU (多线程)、CUDA GPU、macOS Metal 三套编译后端 |
-| **结果聚合** | 主节点收集各节点输出切片，按 `C_out` 拼合为完整输出张量 |
+| Capability | Description |
+|---|---|
+| **Auto-Discovery** | Zero-configuration LAN networking via mDNS (DNS-SD) — no manual IP entry |
+| **Hardware Benchmarking** | Automatic CPU / CUDA / Metal backend detection and performance ranking at startup |
+| **GFLOPS-Aware Scheduling** | Workload allocation proportional to each node's measured compute throughput |
+| **Distributed Conv2D** | Full weight tensor sliced along the `C_out` dimension and distributed to workers |
+| **Deterministic Data** | Input feature maps generated with fixed-seed PRNG — byte-identical across all nodes |
+| **Multi-Backend Support** | Native C++ CPU (multithreaded), CUDA GPU, and macOS Metal compute backends |
+| **Result Aggregation** | Main node collects output slices from all workers and assembles the final output tensor |
 
-## 系统架构
+## Architecture
 
 ```
 ┌──────────────────── LAN ────────────────────┐
@@ -23,13 +23,16 @@
 │  │ Compute Node│      │ Compute Node│  ...  │
 │  │ (Worker)    │      │ (Worker)    │       │
 │  │             │      │             │       │
-│  │ 1.本地生成   │      │ 1.本地生成   │       │
-│  │   input.bin │      │   input.bin │       │
-│  │ 2.跑基准测试 │      │ 2.跑基准测试 │       │
-│  │ 3.注册到Main │      │ 3.注册到Main │       │
-│  │ 4.收weight  │      │ 4.收weight  │       │
-│  │   切片并计算 │      │   切片并计算 │       │
-│  │ 5.回传输出   │      │ 5.回传输出   │       │
+│  │ 1. Generate │      │ 1. Generate │       │
+│  │    input.bin│      │    input.bin│       │
+│  │ 2. Benchmark│      │ 2. Benchmark│       │
+│  │ 3. Register │      │ 3. Register │       │
+│  │    with Main│      │    with Main│       │
+│  │ 4. Receive  │      │ 4. Receive  │       │
+│  │    weight   │      │    weight   │       │
+│  │    slice    │      │    slice    │       │
+│  │ 5. Return   │      │ 5. Return   │       │
+│  │    output   │      │    output   │       │
 │  └──────┬──────┘      └──────┬──────┘       │
 │         │     TCP:9800       │              │
 │         └────────┬───────────┘              │
@@ -37,31 +40,35 @@
 │          ┌───────▼───────┐                  │
 │          │  Main Node    │                  │
 │          │               │                  │
-│          │ 1.生成 input  │                  │
-│          │   + weight    │                  │
-│          │ 2.等待worker  │                  │
-│          │   注册(15s)   │                  │
-│          │ 3.按GFLOPS    │                  │
-│          │   分配Cout切片│                  │
-│          │ 4.下发weight  │                  │
-│          │   + 本地计算  │                  │
-│          │ 5.聚合所有    │                  │
-│          │   输出切片    │                  │
+│          │ 1. Generate   │                  │
+│          │    input +    │                  │
+│          │    weight     │                  │
+│          │ 2. Wait for   │                  │
+│          │    workers    │                  │
+│          │    (15s)      │                  │
+│          │ 3. Allocate   │                  │
+│          │    Cout slices│                  │
+│          │    by GFLOPS  │                  │
+│          │ 4. Distribute │                  │
+│          │    weight +   │                  │
+│          │    local work │                  │
+│          │ 5. Aggregate  │                  │
+│          │    all slices │                  │
 │          └──────────────┘                  │
 └─────────────────────────────────────────────┘
 ```
 
-## 运行方式
+## Getting Started
 
-### 前置条件
+### Prerequisites
 
-- **Python 3.11+**（仅使用标准库，无第三方依赖）
-- **C++ 编译后端**（至少需要一个）：
-  - **Windows CPU**：Visual Studio 2022 + MSVC (`cl.exe`)
-  - **CUDA GPU**：NVIDIA CUDA Toolkit (`nvcc`)
-  - **macOS CPU/Metal**：Xcode Command Line Tools (`clang`)
+- **Python 3.11+** (only the standard library is used — zero third-party dependencies)
+- **Compiled C++ backend** (at least one required):
+  - **Windows CPU**: Visual Studio 2022 + MSVC (`cl.exe`)
+  - **CUDA GPU**: NVIDIA CUDA Toolkit (`nvcc`)
+  - **macOS CPU/Metal**: Xcode Command Line Tools (`clang`)
 
-### 编译计算后端
+### Build the Compute Backends
 
 ```bash
 # Windows (CPU + CUDA)
@@ -71,196 +78,196 @@ Windows-build.bat
 bash Macos-build.bat
 ```
 
-### 启动集群
+### Start the Cluster
 
-**自动发现模式**（推荐）：在每台机器上直接运行，第一台成为 Main Node，后续自动加入为 Compute Node：
+**Auto-discovery mode** (recommended) — run on each machine; the first becomes the Main Node, subsequent ones join as Compute Nodes:
 
 ```bash
 python bootstrap.py
 ```
 
-**手动指定角色**：
+**Manual role assignment:**
 
 ```bash
-# 强制作为 Main Node 启动
+# Force Main Node
 python bootstrap.py --role main
 
-# 强制作为 Compute Node 加入指定主节点
+# Force Compute Node, connecting to a specific main node
 python bootstrap.py --role compute --main-addr 192.168.1.100
 
-# 跳过已有基准测试结果
+# Skip benchmark if result.json already exists
 python bootstrap.py --skip-benchmark
 ```
 
-### 独立运行子组件
+### Run Individual Components
 
 ```bash
-# 仅运行硬件基准测试
+# Run hardware benchmark only
 python compute_node/performance_metrics/benchmark.py
 
-# 仅生成数据集
-python "compute_node/input matrix/generate.py" --output-dir ./data --role main
+# Generate dataset only
+python compute_node/dataset/generate.py --output-dir ./data --role main
 ```
 
-## 启动流程
+## Startup Flow
 
 ```mermaid
 flowchart TD
-    A[bootstrap.py 启动] --> B[平台检测 & 权限检查]
-    B --> C{指定了 --role ?}
-    C -->|是| D[使用指定角色]
-    C -->|否| E[10s mDNS LAN 发现]
-    E -->|发现 Main Node| F[角色 → Compute Node]
-    E -->|未发现| G[角色 → Main Node]
-    D --> H[生成确定性数据集]
+    A[bootstrap.py starts] --> B[Platform detection & privilege check]
+    B --> C{--role specified?}
+    C -->|Yes| D[Use specified role]
+    C -->|No| E[10s mDNS LAN discovery]
+    E -->|Main Node found| F["Role → Compute Node"]
+    E -->|Not found| G["Role → Main Node"]
+    D --> H[Generate deterministic datasets]
     F --> H
     G --> H
-    H --> I[运行硬件基准测试]
-    I --> J{角色?}
-    J -->|Main| K[启动 TCP 服务器<br/>等待 15s 接受 Worker]
-    J -->|Compute| L[连接 Main Node<br/>发送注册信息]
-    K --> M{有 Worker 连接?}
-    M -->|有| N[分布式计算]
-    M -->|无| O[本地单机计算]
-    L --> P[接收任务 + Weight 切片]
-    P --> Q[执行计算并回传结果]
-    N --> R[聚合输出 → runtime_output.bin]
+    H --> I[Run hardware benchmark]
+    I --> J{Role?}
+    J -->|Main| K[Start TCP server<br/>Accept workers for 15s]
+    J -->|Compute| L[Connect to Main Node<br/>Send registration]
+    K --> M{Workers connected?}
+    M -->|Yes| N[Distributed computation]
+    M -->|No| O[Local single-node computation]
+    L --> P[Receive task + weight slice]
+    P --> Q[Execute and return results]
+    N --> R["Aggregate output → runtime_output.bin"]
     O --> R
 ```
 
-## 数据流
+## Data Flow
 
-### 确定性数据生成
+### Deterministic Data Generation
 
-所有节点使用相同的 xorshift32 PRNG 和固定种子生成输入数据，确保**逐字节一致**：
+All nodes use the same xorshift32 PRNG with fixed seeds to generate input data, ensuring **byte-for-byte consistency**:
 
-| 数据 | 种子 | 生成者 | 大小 (默认 2048×2048) |
-|------|------|--------|----------------------|
-| `runtime_input.bin` | `0x123456789ABCDEF0` | 所有节点各自本地生成 | 2048×2048×128×4 = **2 GB** |
-| `runtime_weight.bin` | `0x0FEDCBA987654321` | **仅 Main Node** 生成 | 3×3×128×256×4 = **1.125 MB** |
+| Data | Seed | Generated By | Size (default 2048×2048) |
+|---|---|---|---|
+| `runtime_input.bin` | `0x123456789ABCDEF0` | Each node (locally) | 2048×2048×128×4 = **2 GB** |
+| `runtime_weight.bin` | `0x0FEDCBA987654321` | **Main Node only** | 3×3×128×256×4 = **1.125 MB** |
 
-### 分布式计算协议
+### Cluster Communication Protocol
 
-通信使用简单的长度前缀 TCP 消息格式：`[4B 长度][1B 类型][payload]`
+Communication uses a simple length-prefixed TCP message format: `[4B length][1B type][payload]`
 
-| 消息类型 | 方向 | 内容 |
-|---------|------|------|
-| `REGISTER` | Compute → Main | 节点名称、GFLOPS、后端类型 |
-| `TASK_ASSIGN` | Main → Compute | worker_id、oc 范围、卷积参数 |
-| `WEIGHT_DATA` | Main → Compute | 按 `C_out` 维度切片的 weight 二进制 |
-| `START` | Main → Compute | 开始计算信号 |
-| `TASK_DONE` | Compute → Main | 计时、GFLOPS、checksum |
-| `OUTPUT_DATA` | Compute → Main | 输出切片二进制数据 |
-| `ALL_DONE` | Main → Compute | 任务完成，关闭连接 |
+| Message Type | Direction | Content |
+|---|---|---|
+| `REGISTER` | Compute → Main | Node name, GFLOPS, backend type |
+| `TASK_ASSIGN` | Main → Compute | worker_id, output channel range, conv parameters |
+| `WEIGHT_DATA` | Main → Compute | Weight slice along `C_out` dimension (binary) |
+| `START` | Main → Compute | Begin computation signal |
+| `TASK_DONE` | Compute → Main | Elapsed time, GFLOPS, checksum |
+| `OUTPUT_DATA` | Compute → Main | Output slice (binary) |
+| `ALL_DONE` | Main → Compute | Task complete, close connection |
 
-### 工作量分配
+### Workload Allocation
 
-Main Node 按各节点 GFLOPS 按比例分配 `C_out` 范围：
+The Main Node distributes `C_out` ranges proportionally based on each node's GFLOPS:
 
 ```
-总 C_out = 256
+Total C_out = 256
 Node A (40 GFLOPS) → oc=[0, 128)     50%
 Node B (30 GFLOPS) → oc=[128, 224)   37.5%
 Main   (10 GFLOPS) → oc=[224, 256)   12.5%
 ```
 
-## 默认卷积规模
+## Default Convolution Dimensions
 
-| 参数 | 基准测试 (Test) | 正式运算 (Runtime) |
-|------|----------------|-------------------|
-| 输入大小 (H×W) | 256×256 | 2048×2048 |
-| 输入通道 (C_in) | 32 | 128 |
-| 输出通道 (C_out) | 64 | 256 |
-| 卷积核 (K) | 3×3 | 3×3 |
+| Parameter | Benchmark (Test) | Runtime |
+|---|---|---|
+| Input size (H×W) | 256×256 | 2048×2048 |
+| Input channels (C_in) | 32 | 128 |
+| Output channels (C_out) | 64 | 256 |
+| Kernel size (K) | 3×3 | 3×3 |
 | Padding | 1 | 1 |
 
-## 目录结构
+## Directory Structure
 
 ```
 SuperWeb/
-├── bootstrap.py                # 总入口：角色判定 → 数据生成 → 跑分 → 启动运行时
-├── config.py                   # 运行时配置(端口/超时/组播等默认值)
-├── constants.py                # 全局常量(消息类型/服务名等)
-├── supervisor.py               # 遗留启动协调器(向后兼容)
-├── protocol.py                 # mDNS/DNS-SD 报文构建与解析
-├── runtime_protocol.py         # Protobuf 编解码(注册/心跳/客户端消息)
-├── logging_setup.py            # 日志配置
-├── trace_utils.py              # 函数调用追踪装饰器
-├── recovery.py                 # 异常恢复占位(未实现)
+├── bootstrap.py                # Entry point: role detection → data gen → benchmark → runtime
+├── config.py                   # Runtime config (ports, timeouts, multicast defaults)
+├── constants.py                # Global constants (message types, service names)
+├── supervisor.py               # Legacy startup coordinator (backward-compatible)
+├── protocol.py                 # mDNS/DNS-SD packet construction and parsing
+├── runtime_protocol.py         # Protobuf encode/decode (registration, heartbeat, client msgs)
+├── logging_setup.py            # Logging configuration
+├── trace_utils.py              # Function call tracing decorator
+├── recovery.py                 # Fault recovery placeholder (not yet implemented)
 │
-├── common/                     # 共享模块
-│   ├── cluster_protocol.py     #   TCP 消息协议(长度前缀帧格式)
-│   ├── types.py                #   共享数据类(DiscoveryResult, HardwareProfile 等)
-│   ├── hardware.py             #   硬件信息采集
-│   ├── state.py                #   运行时状态枚举
-│   ├── messages.py             #   消息结构
-│   └── errors.py               #   自定义异常
+├── common/                     # Shared modules
+│   ├── cluster_protocol.py     #   TCP message protocol (length-prefixed frame format)
+│   ├── types.py                #   Shared dataclasses (DiscoveryResult, HardwareProfile, etc.)
+│   ├── hardware.py             #   Hardware info collection
+│   ├── state.py                #   Runtime state enum
+│   ├── messages.py             #   Message structures
+│   └── errors.py               #   Custom exceptions
 │
-├── discovery/                  # 节点发现
-│   ├── pairing.py              #   发现/公告流程编排
-│   ├── multicast.py            #   mDNS 组播收发
-│   └── fallback.py             #   手动输入地址回退
+├── discovery/                  # Node discovery
+│   ├── pairing.py              #   Discovery/announce flow orchestration
+│   ├── multicast.py            #   mDNS multicast send/receive
+│   └── fallback.py             #   Manual address input fallback
 │
-├── adapters/                   # 平台适配层
-│   ├── platform.py             #   OS/权限检测
-│   ├── network.py              #   网络工具(本地IP/MAC)
-│   ├── firewall/               #   防火墙规则管理
-│   ├── audit_log.py            #   审计日志占位
-│   └── process.py              #   进程管理占位
+├── adapters/                   # Platform abstraction layer
+│   ├── platform.py             #   OS/privilege detection
+│   ├── network.py              #   Network utilities (local IP, MAC address)
+│   ├── firewall/               #   Firewall rule management
+│   ├── audit_log.py            #   Audit log placeholder
+│   └── process.py              #   Process management placeholder
 │
-├── main_node/                  # 主节点运行时
-│   ├── runtime.py              #   TCP 服务器、任务编排、分布式执行
-│   ├── dispatcher.py           #   本地/分布式任务调度
-│   ├── registry.py             #   Worker 注册表、GFLOPS 权重切片分配
-│   ├── aggregator.py           #   输出切片聚合(按 C_out 拼合)
-│   ├── heartbeat.py            #   心跳管理
-│   └── handlers.py             #   消息处理(占位)
+├── main_node/                  # Main node runtime
+│   ├── runtime.py              #   TCP server, task orchestration, distributed execution
+│   ├── dispatcher.py           #   Local/distributed task dispatch
+│   ├── registry.py             #   Worker registry, GFLOPS-weighted slice allocation
+│   ├── aggregator.py           #   Output slice aggregation (reassembly by C_out)
+│   ├── heartbeat.py            #   Heartbeat management
+│   └── handlers.py             #   Message handlers (placeholder)
 │
-├── compute_node/               # 计算节点运行时
-│   ├── runtime.py              #   连接 Main → 注册 → 收 weight → 计算 → 回传
-│   ├── executor.py             #   调用编译后端执行卷积
-│   ├── session.py              #   Protobuf TCP 会话管理
-│   ├── performance_summary.py  #   跑分结果摘要
-│   ├── heartbeat.py            #   心跳响应
-│   ├── handlers.py             #   消息处理(占位)
+├── compute_node/               # Compute node runtime
+│   ├── runtime.py              #   Connect → Register → Receive weight → Compute → Return
+│   ├── executor.py             #   Invoke compiled backend for convolution
+│   ├── session.py              #   Protobuf TCP session management
+│   ├── performance_summary.py  #   Benchmark result summary
+│   ├── heartbeat.py            #   Heartbeat response
+│   ├── handlers.py             #   Message handlers (placeholder)
 │   │
-│   ├── input matrix/           #   确定性数据集
-│   │   ├── generate.py         #     数据生成脚本
-│   │   └── generated/          #     生成的 .bin 文件(git-ignored)
+│   ├── dataset/                #   Deterministic dataset generation
+│   │   ├── generate.py         #     Data generation script
+│   │   └── generated/          #     Generated .bin files (git-ignored)
 │   │
-│   └── performance_metrics/    #   硬件基准测试
-│       ├── benchmark.py        #     跑分入口
-│       ├── models.py           #     BenchmarkSpec / TrialRecord 等数据类
-│       ├── workloads.py        #     测试/运行时规模定义
-│       ├── fmvm_dataset.py     #     PRNG 数据集生成器
-│       ├── scoring.py          #     性能评分算法
-│       ├── path_utils.py       #     可执行文件路径工具
-│       ├── result.json         #     跑分报告(git-ignored)
-│       ├── backends/           #     Python 后端适配器
-│       │   ├── cpu_backend.py  #       CPU 后端
-│       │   ├── cuda_backend.py #       CUDA 后端
-│       │   └── metal_backend.py#       Metal 后端
-│       └── fixed_matrix_vector_multiplication/
-│           ├── cpu/            #       C++ CPU 源码 & 编译产物
-│           ├── cuda/           #       CUDA 源码 & 编译产物
-│           └── metal/          #       Metal 源码 & 编译产物
+│   └── performance_metrics/    #   Hardware benchmark workspace
+│       ├── benchmark.py        #     Benchmark entry point
+│       ├── models.py           #     BenchmarkSpec / TrialRecord dataclasses
+│       ├── workloads.py        #     Test/runtime dimension definitions
+│       ├── fmvm_dataset.py     #     PRNG-based dataset generator
+│       ├── scoring.py          #     Performance scoring algorithm
+│       ├── path_utils.py       #     Executable path utilities
+│       ├── result.json         #     Benchmark report (git-ignored)
+│       ├── backends/           #     Python backend adapters
+│       │   ├── cpu_backend.py  #       CPU backend
+│       │   ├── cuda_backend.py #       CUDA backend
+│       │   └── metal_backend.py#       Metal backend
+│       └── conv2d_runners/     #     Compiled native Conv2D executables
+│           ├── cpu/            #       C++ CPU source & binaries
+│           ├── cuda/           #       CUDA source & binaries
+│           └── metal/          #       Metal source & binaries
 │
-├── standalone_model/           # 独立网络实验(mDNS/TCP/ZMQ 对比测试)
-├── proto/                      # Protobuf 协议定义文件
-├── tests/                      # 单元测试
+├── standalone_model/           # Standalone network experiments (mDNS/TCP/ZMQ comparisons)
+├── proto/                      # Protobuf protocol definition files
+├── tests/                      # Unit tests
 │
-├── Windows-build.bat           # Windows 编译脚本(MSVC + CUDA)
-└── Macos-build.bat             # macOS 编译脚本(Clang + Metal)
+├── Windows-build.bat           # Windows build script (MSVC + CUDA)
+└── Macos-build.bat             # macOS build script (Clang + Metal)
 ```
 
-## 技术要点
+## Technical Notes
 
-- **纯标准库**：核心运行时仅依赖 Python 标准库（socket、struct、threading、subprocess 等），无第三方包。
-- **手写 Protobuf**：`runtime_protocol.py` 实现了完整的 protobuf wire-format 编解码，无需安装 protobuf 库。
-- **手写 mDNS**：`protocol.py` 实现了 DNS-SD PTR/SRV/TXT/A 记录的构建与解析。
-- **C++/CUDA 计算后端**：实际卷积运算由编译好的原生可执行文件完成，Python 通过 `subprocess` 调用并解析 JSON 输出。
-- **确定性数据一致性**：固定种子 xorshift32 PRNG 保证所有节点生成的 input matrix 完全相同，避免了 2GB 数据的网络传输。
+- **Pure Standard Library**: The core runtime depends only on the Python standard library (`socket`, `struct`, `threading`, `subprocess`, etc.) — no third-party packages required.
+- **Hand-Written Protobuf**: `runtime_protocol.py` implements full protobuf wire-format encode/decode without the protobuf library.
+- **Hand-Written mDNS**: `protocol.py` implements DNS-SD PTR/SRV/TXT/A record construction and parsing from scratch.
+- **C++/CUDA Compute Backends**: Actual convolution is performed by compiled native executables. Python invokes them via `subprocess` and parses their JSON output.
+- **Deterministic Data Consistency**: A fixed-seed xorshift32 PRNG guarantees all nodes generate identical input matrices, avoiding the need to transfer 2 GB over the network.
 
-## 许可证
+## License
 
-项目仅供学习与研究使用。
+For educational and research purposes only.

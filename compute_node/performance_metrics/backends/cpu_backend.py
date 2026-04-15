@@ -34,7 +34,7 @@ except ImportError:
     from compute_node.performance_metrics.scoring import linear_time_score
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-CPU_ROOT_DIR = ROOT_DIR / "fixed_matrix_vector_multiplication" / "cpu"
+CPU_ROOT_DIR = ROOT_DIR / "conv2d_runners" / "cpu"
 WINDOWS_SELF_CONTAINED_NOTE = (
     "Windows CPU runner is built as a self-contained executable with the static MSVC runtime "
     "(`/MT`), so runtime does not require Visual Studio or the VC++ redistributable."

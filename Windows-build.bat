@@ -14,13 +14,13 @@ call "%VSDEVCMD%" -arch=x64 -host_arch=x64
 
 echo.
 echo [2/3] CPU 
-cd /d D:\Code\Py\SuperWeb\compute_node\performance_metrics\fixed_matrix_vector_multiplication\cpu\windows
+cd /d D:\Code\Py\SuperWeb\compute_node\performance_metrics\conv2d_runners\cpu\windows
 if not exist build mkdir build
 cl /nologo /std:c++20 /O2 /fp:fast /MT /EHsc /Fe:build\fmvm_cpu_windows.exe fmvm_cpu_windows.cpp
 
 echo.
 echo [3/3]  CUDA 
-cd /d D:\Code\Py\SuperWeb\compute_node\performance_metrics\fixed_matrix_vector_multiplication\cuda
+cd /d D:\Code\Py\SuperWeb\compute_node\performance_metrics\conv2d_runners\cuda
 if not exist build mkdir build
 nvcc fmvm_cuda_runner.cu -O3 --use_fast_math -std=c++17 -o build\fmvm_cuda_runner.exe
 

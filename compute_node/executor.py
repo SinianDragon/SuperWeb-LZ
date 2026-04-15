@@ -26,7 +26,7 @@ class ExecutionResult:
 
 def _find_executable(backend_name: str) -> Path | None:
     """Locate the compiled runner executable."""
-    fmvm_dir = PERF_DIR / "fixed_matrix_vector_multiplication"
+    fmvm_dir = PERF_DIR / "conv2d_runners"
 
     if backend_name == "cpu":
         if sys.platform == "win32":

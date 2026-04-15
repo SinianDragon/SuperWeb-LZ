@@ -28,7 +28,7 @@ class ComputeNodeRuntime:
         self.main_addr = main_addr  # IP or hostname of the main node
         self.config = config
         self.root = Path(__file__).resolve().parent.parent
-        self.dataset_dir = self.root / "compute_node" / "input matrix" / "generated"
+        self.dataset_dir = self.root / "compute_node" / "dataset" / "generated"
         self.node_name = os.environ.get("COMPUTERNAME", socket.gethostname())
 
     def run(self) -> dict:

@@ -184,7 +184,7 @@ class PerformanceMatricsTests(unittest.TestCase):
             )
             report = benchmark.run_benchmark(args)
 
-        self.assertEqual(report["method"], "fixed_matrix_vector_multiplication")
+        self.assertEqual(report["method"], "Conv2D")
         self.assertEqual(report["schema_version"], 2)
         self.assertEqual(report["best_backend"], "cpu")
         self.assertEqual(report["ranking"], ["cpu"])
