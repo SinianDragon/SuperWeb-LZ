@@ -20,7 +20,7 @@ class HeartbeatMonitor:
                 try:
                     # Minimal Sprint 1 logic: just send a ping
                     msg = build_heartbeat(MAIN_NODE_NAME)
-                    send_message(worker.sock, msg)
+                    send_message(worker.conn, msg)
                 except Exception as exc:
                     self.logger.warning(f"Worker {worker.node_name} failed heartbeat: {exc}")
-                    self.registry.remove_worker(worker.peer_id)
+                    self.registry.remove_worker(worker.worker_id)

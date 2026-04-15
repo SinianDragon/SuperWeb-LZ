@@ -42,7 +42,11 @@ def build_benchmark_spec(*, h=None, w=None, c_in=None, c_out=None, k=None, pad=N
         return get_test_spec()
     return BenchmarkSpec(
         name="custom-conv2d",
-        h=h or TEST_H, w=w or TEST_W, c_in=c_in or TEST_CIN, c_out=c_out or TEST_COUT,
-        k=k or TEST_K, pad=pad or TEST_PAD,
+        h=h if h is not None else TEST_H, 
+        w=w if w is not None else TEST_W, 
+        c_in=c_in if c_in is not None else TEST_CIN, 
+        c_out=c_out if c_out is not None else TEST_COUT,
+        k=k if k is not None else TEST_K, 
+        pad=pad if pad is not None else TEST_PAD,
         ideal_seconds=TEST_IDEAL_SECONDS, zero_score_seconds=TEST_IDEAL_SECONDS * 10
     )

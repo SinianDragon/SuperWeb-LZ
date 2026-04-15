@@ -47,16 +47,24 @@ def send_json(sock: socket.socket, msg_type: int, data: dict) -> None:
     sock.sendall(header + payload)
 
 
+# Maximum accepted message size (4 GiB). Prevents unbounded allocation from
+# corrupt or malicious length headers.
+MAX_MESSAGE_SIZE = 4 * 1024 * 1024 * 1024
+
+
 def send_binary(sock: socket.socket, msg_type: int, data: bytes) -> None:
     """Send a binary message."""
     header = struct.pack(">IB", len(data) + 1, msg_type)
-    sock.sendall(header + data)
+    sock.sendall(header)
+    sock.sendall(data)
 
 
 def recv_msg(sock: socket.socket) -> tuple[int, bytes]:
     """Receive one message. Returns (msg_type, payload_bytes)."""
     header = _recv_exact(sock, 5)
     total_len, msg_type = struct.unpack(">IB", header)
+    if total_len > MAX_MESSAGE_SIZE:
+        raise ValueError(f"Message too large: {total_len} bytes (limit {MAX_MESSAGE_SIZE})")
     payload = _recv_exact(sock, total_len - 1) if total_len > 1 else b""
     return msg_type, payload
 

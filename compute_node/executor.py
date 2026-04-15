@@ -69,7 +69,7 @@ def _get_best_gflops() -> float:
         best_backend = data.get("best_backend", "cpu")
         results = data.get("backend_results", {})
         br = results.get(best_backend, {})
-        trial = br.get("best_trial") or br.get("autotune_trial") or {}
+        trial = br.get("best_trial") or br.get("best_result") or br.get("autotune_trial") or {}
         return float(trial.get("effective_gflops", 0))
     except Exception:
         return 0.0

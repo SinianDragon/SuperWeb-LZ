@@ -128,6 +128,7 @@ class MainNodeRuntime:
         worker_threads = []
         worker_results: dict[int, tuple[int, int, bytes | None]] = {}
         errors = []
+        results_lock = threading.Lock()
 
         for worker in workers:
             key = f"worker_{worker.worker_id}"
@@ -145,7 +146,7 @@ class MainNodeRuntime:
 
             t = threading.Thread(
                 target=self._distribute_to_worker,
-                args=(worker, start_oc, end_oc, weight_slice, worker_results, errors),
+                args=(worker, start_oc, end_oc, weight_slice, worker_results, errors, results_lock),
                 daemon=True,
             )
             worker_threads.append(t)
@@ -235,7 +236,7 @@ class MainNodeRuntime:
         }
 
     def _distribute_to_worker(self, worker, start_oc, end_oc, weight_slice,
-                              results_dict, errors_list):
+                              results_dict, errors_list, lock):
         """Send task to one worker, wait for output. Runs in a thread."""
         spec = self.spec
         try:
@@ -267,13 +268,16 @@ class MainNodeRuntime:
             # 5. Receive OUTPUT_DATA
             msg_type, output_data = recv_msg(worker.conn)
             if msg_type == MSG_OUTPUT_DATA:
-                results_dict[worker.worker_id] = (start_oc, end_oc, output_data)
+                with lock:
+                    results_dict[worker.worker_id] = (start_oc, end_oc, output_data)
                 logger.info(f"Received {len(output_data)/1048576:.1f} MB output from worker #{worker.worker_id}")
             else:
-                errors_list.append(f"Worker #{worker.worker_id}: unexpected msg type {msg_type}")
-                results_dict[worker.worker_id] = (start_oc, end_oc, None)
+                with lock:
+                    errors_list.append(f"Worker #{worker.worker_id}: unexpected msg type {msg_type}")
+                    results_dict[worker.worker_id] = (start_oc, end_oc, None)
 
         except Exception as exc:
             logger.error(f"Worker #{worker.worker_id} communication failed: {exc}")
-            errors_list.append(str(exc))
-            results_dict[worker.worker_id] = (start_oc, end_oc, None)
+            with lock:
+                errors_list.append(str(exc))
+                results_dict[worker.worker_id] = (start_oc, end_oc, None)

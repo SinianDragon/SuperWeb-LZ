@@ -98,7 +98,7 @@ class ComputeNodeRuntime:
         logger.info(f"Received weight data: {weight_mb:.1f} MB")
 
         # Save weight slice to file
-        weight_path = self.dataset_dir / "runtime_weight.bin"
+        weight_path = self.dataset_dir / f"runtime_weight_{worker_id}.bin"
         weight_path.write_bytes(weight_data)
 
         # ─── Step 4: Wait for START signal ───────────────────────────────
@@ -110,7 +110,7 @@ class ComputeNodeRuntime:
 
         # ─── Step 5: Execute computation ─────────────────────────────────
         input_path = self.dataset_dir / "runtime_input.bin"
-        output_path = self.dataset_dir / "runtime_output.bin"
+        output_path = self.dataset_dir / f"runtime_output_{worker_id}.bin"
 
         start_time = time.perf_counter()
 
@@ -142,6 +142,11 @@ class ComputeNodeRuntime:
         output_data = output_path.read_bytes()
         send_binary(sock, MSG_OUTPUT_DATA, output_data)
         logger.info(f"Sent output: {len(output_data)/1048576:.1f} MB")
+
+        # Cleanup worker-specific temp files
+        for p in [weight_path, output_path]:
+            if p.exists():
+                p.unlink()
 
         # ─── Step 8: Wait for ALL_DONE ───────────────────────────────────
         try:

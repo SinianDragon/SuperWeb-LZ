@@ -97,6 +97,8 @@ class ClusterRegistry:
         allocation = {}
         oc = 0
         for i, (kind, wid, gflops) in enumerate(participants):
+            if oc >= total_cout:
+                break  # no more channels to assign
             if i == len(participants) - 1:
                 end = total_cout  # last one gets remainder
             else:

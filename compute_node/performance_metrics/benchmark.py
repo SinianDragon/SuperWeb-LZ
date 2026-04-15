@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pad", type=int)
     return parser
 
-def _generate_if_needed(dataset_dir: Path, spec, role: str) -> None:
+def _generate_if_needed(dataset_dir: Path, spec, role: str, has_custom_h: bool = False) -> None:
     """仅在文件缺失时调用生成脚本，避免重复生成大文件时的冗余日志。"""
     test_layout = build_dataset_layout(dataset_dir, prefix="test_")
     runtime_layout = build_dataset_layout(dataset_dir, prefix="runtime_")
@@ -50,7 +50,7 @@ def _generate_if_needed(dataset_dir: Path, spec, role: str) -> None:
     if needs_gen:
         script = ROOT_DIR.parent / "dataset" / "generate.py"
         cmd = [sys.executable, str(script), "--output-dir", str(dataset_dir), "--role", role]
-        if spec.h:
+        if has_custom_h:
             cmd.extend(["--h", str(spec.h), "--w", str(spec.w)])
         subprocess.run(cmd, check=True)
 
@@ -59,7 +59,7 @@ def run_benchmark(args: argparse.Namespace) -> dict:
     dataset_dir = Path(args.dataset_dir)
 
     # 1. 确保数据存在 (1025 规模逻辑在 generate.py 中由 get_runtime_spec 锁定)
-    _generate_if_needed(dataset_dir, spec, args.role)
+    _generate_if_needed(dataset_dir, spec, args.role, args.h is not None)
 
     # 2. 探测并运行硬件测试
     backends = build_backends(args.backend)

@@ -35,8 +35,8 @@ def parse_args():
                         help="Main node IP (required when --role compute)")
     parser.add_argument("--name", default=None,
                         help="Node name (default: hostname)")
-    parser.add_argument("--skip-benchmark", action="store_true",
-                        help="Skip benchmark if result.json already exists")
+    parser.add_argument("--force-benchmark", action="store_true",
+                        help="Force re-run benchmark even if result.json already exists")
     return parser.parse_args()
 
 
@@ -87,14 +87,14 @@ def ensure_data_generated(role: str, logger):
     )
 
 
-def ensure_benchmark_ready(role: str, logger, skip: bool = False):
+def ensure_benchmark_ready(role: str, logger, force: bool = False):
     """Run benchmark if result.json doesn't exist."""
     import subprocess
 
     result_path = ROOT_DIR / "compute_node" / "performance_metrics" / "result.json"
 
-    if skip and result_path.exists():
-        logger.info("Benchmark result already exists, skipping.")
+    if not force and result_path.exists():
+        logger.info("Benchmark result already exists, skipping. Use --force-benchmark to re-run.")
         return
 
     logger.info(f"Generating data files and running benchmark for role: {role}")
@@ -171,7 +171,7 @@ def main():
 
     # ─── Step 3: Run benchmark ───────────────────────────────────────────
     try:
-        ensure_benchmark_ready(role, logger, skip=args.skip_benchmark)
+        ensure_benchmark_ready(role, logger, force=args.force_benchmark)
     except Exception as exc:
         logger.error(f"Failed to run benchmark for role {role}: {exc}")
         sys.exit(1)
