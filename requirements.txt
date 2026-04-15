@@ -1,3 +1,8 @@
-# Core project stays mostly stdlib; standalone ZeroMQ benchmarks need pyzmq.
+# ─── Core Runtime ───────────────────────────────────────────────────────────────
+# The core distributed cluster runtime uses ONLY the Python standard library.
+# No third-party packages are required for: bootstrap, discovery, benchmarking,
+# data generation, task distribution, computation, and result aggregation.
+
+# ─── Standalone Network Experiments (optional) ──────────────────────────────────
+# Only needed if running scripts in standalone_model/ (ZMQ-based benchmarks).
 pyzmq>=27.1.0
-tqdm>=4.67.0
