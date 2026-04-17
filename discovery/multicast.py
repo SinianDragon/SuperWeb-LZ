@@ -9,15 +9,15 @@ from dataclasses import dataclass
 
 from adapters import network
 from common.types import DiscoveryResult
-from config import AppConfig
-from protocol import (
+from app.config import AppConfig
+from wire.discovery import (
     describe_discovery_message,
     build_announce_message,
     build_discover_message,
     parse_announce_message,
     parse_discover_message,
 )
-from trace_utils import trace_function
+from app.trace_utils import trace_function
 
 
 @dataclass(slots=True)

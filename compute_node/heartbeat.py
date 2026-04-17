@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from runtime_protocol import Heartbeat
-from trace_utils import trace_function
+from wire.runtime import Heartbeat
+from app.trace_utils import trace_function
 
 
 @dataclass(slots=True)

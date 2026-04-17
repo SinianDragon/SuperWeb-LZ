@@ -6,7 +6,7 @@ import socket
 import struct
 import uuid
 
-from trace_utils import trace_function
+from app.trace_utils import trace_function
 
 
 @trace_function

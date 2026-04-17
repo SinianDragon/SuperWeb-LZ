@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 from common.types import PlatformInfo
-from trace_utils import trace_function
+from app.trace_utils import trace_function
 
 
 @trace_function

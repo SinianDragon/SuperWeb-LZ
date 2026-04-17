@@ -1,204 +1,262 @@
-"""SuperWeb Cluster Bootstrap — entry point for both Main and Compute nodes.
-
-Usage:
-    python bootstrap.py                  # Auto-discover role via LAN scan
-    python bootstrap.py --role main      # Force Main Node mode
-    python bootstrap.py --role compute --main-addr 192.168.1.100  # Force Compute Node
-"""
+﻿"""Top-level bootstrap entry point for superweb-cluster."""
 
 from __future__ import annotations
 
 import argparse
-import json
-import logging
-import os
+import subprocess
 import sys
-import time
 from pathlib import Path
 
-# ─── Path setup ─────────────────────────────────────────────────────────────────
-ROOT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT_DIR))
-sys.path.insert(0, str(ROOT_DIR / "compute_node" / "performance_metrics"))
+from adapters.firewall import ensure_rules
+from adapters.platform import detect_os, relaunch_as_admin
+from app.config import AppConfig
+from app.constants import (
+    APP_NAME,
+    COMPUTE_NODE_NAME,
+    DEFAULT_NODE_NAME,
+    DEFAULT_DISCOVERY_ATTEMPTS,
+    DEFAULT_DISCOVERY_PORT,
+    DEFAULT_DISCOVERY_RETRY_DELAY,
+    DEFAULT_DISCOVERY_TIMEOUT,
+    DEFAULT_MULTICAST_GROUP,
+    DEFAULT_TCP_PORT,
+    MAIN_NODE_NAME,
+)
+from app.logging_setup import configure_logging
+from app.supervisor import Supervisor
+from app.trace_utils import trace_function
+from setup import REQUIREMENTS_STAMP_PATH, active_python_path, inspect_project_environment, project_python_path
 
-from logging_setup import configure_logging
-from adapters.platform import detect_os, is_admin
-from config import AppConfig
-from constants import MAIN_NODE_NAME
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="SuperWeb Distributed Cluster")
-    parser.add_argument("--role", choices=["main", "compute"], default=None,
-                        help="Force role (skip LAN discovery)")
-    parser.add_argument("--main-addr", default=None,
-                        help="Main node IP (required when --role compute)")
-    parser.add_argument("--name", default=None,
-                        help="Node name (default: hostname)")
-    parser.add_argument("--force-benchmark", action="store_true",
-                        help="Force re-run benchmark even if result.json already exists")
-    return parser.parse_args()
-
-
-def run_discovery(config) -> tuple[str, str | None]:
-    """Run 10s LAN discovery. Returns (role, main_addr_or_None)."""
-    from discovery.pairing import run_pairing
-
-    logger = logging.getLogger("superweb_cluster")
-    logger.info("Starting 10s LAN discovery scan...")
-
-    result = run_pairing(config)
-    if result and result.peer_address:
-        logger.info(f"Main Node found at {result.peer_address}. Role -> Compute Node")
-        return "compute", result.peer_address
-    else:
-        reason = result.message if result and result.message else "Discovery timed out."
-        logger.info(f"No Main Node found ({reason}). Role -> Main Node")
-        return "main", None
+PROJECT_ROOT = Path(__file__).resolve().parent
+COMPUTE_NODE_DIR = PROJECT_ROOT / "compute_node"
+BENCHMARK_DIR = COMPUTE_NODE_DIR / "performance_metrics"
+BENCHMARK_SCRIPT_PATH = BENCHMARK_DIR / "benchmark.py"
+BENCHMARK_RESULT_PATH = BENCHMARK_DIR / "result.json"
 
 
-def ensure_data_generated(role: str, logger):
-    """Generate test + runtime data files if they don't already exist."""
-    import subprocess
+def _benchmark_command() -> list[str]:
+    """Build the local benchmark command using the current Python executable."""
 
-    gen_dir = ROOT_DIR / "compute_node" / "dataset" / "generated"
-    gen_dir.mkdir(parents=True, exist_ok=True)
+    return [str(active_python_path()), str(BENCHMARK_SCRIPT_PATH), "--method", "all"]
 
-    # Check what already exists
-    has_test = (gen_dir / "test_input.bin").exists()
-    has_runtime_input = (gen_dir / "runtime_input.bin").exists()
-    has_runtime_weight = (gen_dir / "runtime_weight.bin").exists()
 
-    if role == "main":
-        if has_test and has_runtime_input and has_runtime_weight:
-            logger.info("All data files already exist, skipping generation.")
-            return
-    else:  # compute
-        if has_test and has_runtime_input:
-            logger.info("Compute data files already exist, skipping generation.")
-            return
+def _setup_command() -> list[str]:
+    """Build the explicit setup command users should run when the venv is not ready."""
 
-    logger.info(f"Generating data files for role: {role}")
-    subprocess.run(
-        [sys.executable, str(ROOT_DIR / "compute_node" / "dataset" / "generate.py"),
-         "--output-dir", str(gen_dir),
-         "--role", role],
-        check=True, cwd=str(ROOT_DIR),
+    return [sys.executable, str(PROJECT_ROOT / "setup.py")]
+
+
+def _display_project_path(path: Path) -> str:
+    """Render a project-local path for bootstrap log messages."""
+
+    return path.relative_to(PROJECT_ROOT).as_posix()
+
+
+@trace_function
+def ensure_bootstrap_runtime_environment(logger, argv: list[str]) -> int | None:
+    """Ensure bootstrap runs with the prepared project venv.
+
+    Returns:
+        `None` when bootstrap can continue locally.
+        An exit code when bootstrap should stop or after it relaunches itself.
+    """
+
+    status = inspect_project_environment()
+    if not status.ready:
+        setup_command = " ".join(_setup_command())
+        logger.error(
+            "Project Python environment is not ready. Run `%s` first, then retry bootstrap.",
+            setup_command,
+        )
+        if not status.venv_exists:
+            logger.error("Missing local virtual environment at %s.", _display_project_path(project_python_path()))
+        if not status.requirements_current:
+            logger.error("Project dependencies are missing or out of date for %s.", _display_project_path(REQUIREMENTS_STAMP_PATH))
+        return 1
+
+    if status.using_project_python:
+        return None
+
+    relaunch_command = [str(project_python_path()), str(PROJECT_ROOT / "bootstrap.py"), *argv]
+    logger.info(
+        "Relaunching bootstrap with the project virtual environment: %s",
+        " ".join(relaunch_command),
     )
-
-
-def ensure_benchmark_ready(role: str, logger, force: bool = False):
-    """Run benchmark if result.json doesn't exist."""
-    import subprocess
-
-    result_path = ROOT_DIR / "compute_node" / "performance_metrics" / "result.json"
-
-    if not force and result_path.exists():
-        logger.info("Benchmark result already exists, skipping. Use --force-benchmark to re-run.")
-        return
-
-    logger.info(f"Generating data files and running benchmark for role: {role}")
-    subprocess.run(
-        [sys.executable,
-         str(ROOT_DIR / "compute_node" / "performance_metrics" / "benchmark.py"),
-         "--role", role],
-        check=True, cwd=str(ROOT_DIR),
-    )
-
-
-def print_summary(result: dict, logger):
-    """Print a human-readable summary of the computation result."""
-    logger.info("=" * 60)
-    logger.info("  COMPUTATION RESULT SUMMARY")
-    logger.info("=" * 60)
-
-    mode = result.get("mode", "unknown")
-    if mode == "local":
-        logger.info(f"  Mode:       Local (single node)")
-        logger.info(f"  Backend:    {result.get('backend', '?').upper()}")
-        logger.info(f"  Time:       {result.get('elapsed_seconds', 0):.2f}s")
-        logger.info(f"  GFLOPS:     {result.get('effective_gflops', 0):.1f}")
-        logger.info(f"  Checksum:   {result.get('checksum', '?')}")
-        logger.info(f"  Output:     {result.get('output_path', '?')}")
-        logger.info(f"  Output Size:{result.get('output_size_mb', 0):.1f} MB")
-    elif mode == "distributed":
-        logger.info(f"  Mode:       Distributed")
-        logger.info(f"  Workers:    {result.get('total_workers', 0)}")
-        logger.info(f"  Slices OK:  {result.get('slices_received', 0)}")
-        logger.info(f"  Output:     {result.get('output_path', '?')}")
-        logger.info(f"  Output Size:{result.get('output_size_mb', 0):.1f} MB")
-        if result.get("errors"):
-            logger.warning(f"  Errors:     {result['errors']}")
-    elif mode == "compute":
-        logger.info(f"  Mode:       Compute Node")
-        logger.info(f"  Worker ID:  {result.get('worker_id', '?')}")
-        logger.info(f"  OC Range:   [{result.get('start_oc', '?')}, {result.get('end_oc', '?')})")
-        logger.info(f"  Time:       {result.get('elapsed_seconds', 0):.2f}s")
-        logger.info(f"  GFLOPS:     {result.get('effective_gflops', 0):.1f}")
-        logger.info(f"  Checksum:   {result.get('checksum', '?')}")
-    else:
-        logger.info(f"  Result: {json.dumps(result, indent=2)}")
-
-    if result.get("error"):
-        logger.error(f"  ERROR: {result['error']}")
-
-    logger.info("=" * 60)
-
-
-def main():
-    configure_logging()
-    logger = logging.getLogger("superweb_cluster")
-    args = parse_args()
-
-    detect_os()
-    is_admin()
-
-    config = AppConfig()
-
-    # ─── Step 1: Determine role ──────────────────────────────────────────
-    if args.role:
-        role = args.role
-        main_addr = args.main_addr
-        if role == "compute" and not main_addr:
-            logger.error("--main-addr is required when --role compute")
-            sys.exit(1)
-        logger.info(f"Role forced: {role.upper()}")
-    else:
-        role, main_addr = run_discovery(config)
-
-    # ─── Step 2: Generate data ───────────────────────────────────────────
-    ensure_data_generated(role, logger)
-
-    # ─── Step 3: Run benchmark ───────────────────────────────────────────
     try:
-        ensure_benchmark_ready(role, logger, force=args.force_benchmark)
-    except Exception as exc:
-        logger.error(f"Failed to run benchmark for role {role}: {exc}")
-        sys.exit(1)
+        result = subprocess.run(
+            relaunch_command,
+            check=False,
+            cwd=PROJECT_ROOT,
+        )
+    except OSError as exc:
+        logger.error("Failed to relaunch bootstrap with the project virtual environment: %s", exc)
+        return 1
+    return int(result.returncode)
 
-    # ─── Step 4: Start runtime ───────────────────────────────────────────
-    start_time = time.perf_counter()
 
-    if role == "main":
-        from main_node.runtime import MainNodeRuntime
-        runtime = MainNodeRuntime()
-        result = runtime.run()
-    else:
-        from compute_node.runtime import ComputeNodeRuntime
-        runtime = ComputeNodeRuntime(main_addr=main_addr)
-        result = runtime.run()
+@trace_function
+def build_parser() -> argparse.ArgumentParser:
+    """Build the kickoff CLI."""
 
-    total_time = time.perf_counter() - start_time
-    result["total_wall_time"] = total_time
+    parser = argparse.ArgumentParser(description=f"{APP_NAME} bootstrap.")
+    parser.add_argument("--role", choices=("discover", "announce"), default="discover")
+    parser.add_argument("--node-name", default=DEFAULT_NODE_NAME)
+    parser.add_argument("--multicast-group", default=DEFAULT_MULTICAST_GROUP)
+    parser.add_argument("--udp-port", type=int, default=DEFAULT_DISCOVERY_PORT)
+    parser.add_argument("--tcp-port", type=int, default=DEFAULT_TCP_PORT)
+    parser.add_argument("--timeout", type=float, default=DEFAULT_DISCOVERY_TIMEOUT)
+    parser.add_argument(
+        "--discover-attempts",
+        type=int,
+        default=DEFAULT_DISCOVERY_ATTEMPTS,
+        help="How many discovery attempts to make before promoting self to the main node.",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=DEFAULT_DISCOVERY_RETRY_DELAY,
+        help="Seconds to wait between discovery attempts.",
+    )
+    parser.add_argument(
+        "--manual-fallback",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable manual input fallback when discovery fails.",
+    )
+    parser.add_argument(
+        "--elevate-if-needed",
+        action="store_true",
+        help="On Windows, relaunch with administrator privileges when needed.",
+    )
+    parser.add_argument("--verbose", action="store_true")
+    return parser
 
-    # ─── Step 5: Print summary ───────────────────────────────────────────
-    print_summary(result, logger)
 
-    # Save result to file
-    result_path = ROOT_DIR / "compute_node" / "dataset" / "generated" / "execution_result.json"
-    result_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
-    logger.info(f"Result saved to {result_path}")
+@trace_function
+def build_config(args: argparse.Namespace) -> AppConfig:
+    """Convert CLI arguments into an AppConfig."""
+
+    return AppConfig(
+        role=args.role,
+        node_name=(
+            MAIN_NODE_NAME
+            if args.node_name == DEFAULT_NODE_NAME and args.role == "announce"
+            else COMPUTE_NODE_NAME
+            if args.node_name == DEFAULT_NODE_NAME
+            else args.node_name
+        ),
+        multicast_group=args.multicast_group,
+        udp_port=args.udp_port,
+        tcp_port=args.tcp_port,
+        discovery_timeout=args.timeout,
+        discovery_attempts=args.discover_attempts,
+        discovery_retry_delay=args.retry_delay,
+        enable_manual_fallback=args.manual_fallback,
+    )
+@trace_function
+def ensure_compute_node_benchmark_ready(logger) -> bool:
+    """Make sure a local compute benchmark result exists before bootstrap continues."""
+
+    if BENCHMARK_RESULT_PATH.exists():
+        return True
+
+    logger.warning(
+        "Missing compute benchmark result at %s. Running the local benchmark now.",
+        _display_project_path(BENCHMARK_RESULT_PATH),
+    )
+    logger.info("Benchmark command: %s", " ".join(_benchmark_command()))
+
+    try:
+        subprocess.run(
+            _benchmark_command(),
+            check=True,
+            cwd=PROJECT_ROOT,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        logger.error("Failed to run compute benchmark automatically: %s", exc)
+        return False
+
+    if not BENCHMARK_RESULT_PATH.exists():
+        logger.error(
+            "Benchmark finished but %s was still not created.",
+            _display_project_path(BENCHMARK_RESULT_PATH),
+        )
+        return False
+
+    logger.info(
+        "Benchmark completed and wrote %s.",
+        _display_project_path(BENCHMARK_RESULT_PATH),
+    )
+    return True
+
+
+@trace_function
+def main(argv: list[str] | None = None) -> int:
+    """Run bootstrap and return a process exit code."""
+
+    # Parse CLI arguments first so the rest of startup can use a single
+    # normalized configuration object.
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    logger = configure_logging(verbose=args.verbose)
+    effective_argv = list(argv) if argv is not None else sys.argv[1:]
+    relaunch_result = ensure_bootstrap_runtime_environment(logger, effective_argv)
+    if relaunch_result is not None:
+        return relaunch_result
+
+    if not ensure_compute_node_benchmark_ready(logger):
+        return 1
+
+    # Platform detection happens before firewall setup so we can route into the
+    # correct adapter and decide whether elevation is even meaningful.
+    platform_info = detect_os()
+    logger.info(
+        "Platform detected: %s (system=%s, release=%s, admin=%s, wsl=%s)",
+        platform_info.platform_name,
+        platform_info.system,
+        platform_info.release,
+        platform_info.is_admin,
+        platform_info.is_wsl,
+    )
+
+    # Windows elevation is only attempted when the user explicitly asks for it.
+    if args.elevate_if_needed and platform_info.can_elevate and relaunch_as_admin():
+        logger.info("Relaunched with administrator privileges.")
+        return 0
+
+    config = build_config(args)
+    # Firewall work is intentionally limited to discovery-phase UDP exposure.
+    firewall_status = ensure_rules(platform_info, config.udp_port)
+    logger.info("Firewall setup: %s", firewall_status.message)
+
+    supervisor = Supervisor(
+        config=config,
+        platform_info=platform_info,
+        firewall_status=firewall_status,
+        logger=logger,
+    )
+
+    try:
+        # The supervisor owns the rest of the kickoff lifecycle, including
+        # discovery, fallback, and best-effort shutdown.
+        result = supervisor.run()
+    finally:
+        supervisor.shutdown()
+
+    if result.success:
+        logger.info(
+            "Final result: source=%s peer=%s:%s message=%s",
+            result.source,
+            result.peer_address,
+            result.peer_port,
+            result.message,
+        )
+        return 0
+
+    logger.error("Final result: %s", result.message)
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
+

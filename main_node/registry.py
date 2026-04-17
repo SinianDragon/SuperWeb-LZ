@@ -1,119 +1,255 @@
-"""Worker registry for Main Node — tracks connected compute nodes."""
+﻿"""Registry of connected workers and clients."""
 
 from __future__ import annotations
 
-import threading
-from dataclasses import dataclass, field
-from typing import Optional
 import socket
+import threading
+import time
+from dataclasses import dataclass, field
+
+from common.types import ComputePerformanceSummary, HardwareProfile, MethodPerformanceSummary
+from app.constants import METHOD_FIXED_MATRIX_VECTOR_MULTIPLICATION, RUNTIME_ROLE_CLIENT, RUNTIME_ROLE_WORKER
+from app.trace_utils import trace_function
 
 
-@dataclass
-class WorkerInfo:
-    """Information about one registered compute node."""
-    worker_id: int
+@dataclass(slots=True)
+class RuntimePeerConnection:
+    """Connected runtime peer metadata stored by the scheduler."""
+
+    peer_id: str
+    runtime_id: str
     node_name: str
-    gflops: float
-    backend: str
-    conn: socket.socket
-    addr: tuple
+    role: str
+    peer_address: str
+    peer_port: int
+    sock: socket.socket = field(repr=False, compare=False)
+    hardware: HardwareProfile | None = None
+    performance: ComputePerformanceSummary | None = None
+    hardware_ids: list[str] = field(default_factory=list)
+    registered_at: float = field(default_factory=time.time)
+    last_heartbeat_at: float = 0.0
+    last_request_at: float = 0.0
+    io_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
-    # Assigned after planning
-    start_oc: int = 0
-    end_oc: int = 0
+
+@dataclass(slots=True)
+class WorkerHardwareCapability:
+    """One benchmarked hardware backend attached to a registered worker."""
+
+    hardware_id: str
+    worker_peer_id: str
+    worker_runtime_id: str
+    worker_node_name: str
+    method: str
+    hardware_type: str
+    effective_gflops: float
+    rank: int
 
 
 class ClusterRegistry:
-    """Thread-safe registry of compute-node workers."""
+    """Thread-safe pools of connected workers and clients."""
 
-    def __init__(self):
+    @trace_function
+    def __init__(self) -> None:
+        self._workers: dict[str, RuntimePeerConnection] = {}
+        self._clients: dict[str, RuntimePeerConnection] = {}
+        self._worker_hardware: dict[str, WorkerHardwareCapability] = {}
+        self._next_hardware_id = 1
+        self._next_worker_id = 1
+        self._next_client_id = 1
+        self._total_effective_gflops = 0.0
         self._lock = threading.Lock()
-        self._workers: dict[int, WorkerInfo] = {}
-        self._next_id = 1
 
-    def register_worker(self, node_name: str, gflops: float, backend: str,
-                        conn: socket.socket, addr: tuple) -> WorkerInfo:
-        """Register a new worker and return its WorkerInfo."""
+    @trace_function
+    def register_worker(
+        self,
+        node_name: str,
+        peer_address: str,
+        peer_port: int,
+        hardware: HardwareProfile,
+        performance: ComputePerformanceSummary,
+        sock: socket.socket,
+    ) -> RuntimePeerConnection:
+        peer_id = f"worker:{node_name}@{peer_address}:{peer_port}"
         with self._lock:
-            wid = self._next_id
-            self._next_id += 1
-            worker = WorkerInfo(
-                worker_id=wid, node_name=node_name,
-                gflops=gflops, backend=backend,
-                conn=conn, addr=addr,
+            runtime_id = f"worker-{self._next_worker_id}"
+            self._next_worker_id += 1
+            connection = RuntimePeerConnection(
+                peer_id=peer_id,
+                runtime_id=runtime_id,
+                node_name=node_name,
+                role=RUNTIME_ROLE_WORKER,
+                peer_address=peer_address,
+                peer_port=peer_port,
+                hardware=hardware,
+                performance=performance,
+                sock=sock,
             )
-            self._workers[wid] = worker
-            return worker
+            self._workers[peer_id] = connection
+            method_summaries = list(performance.method_summaries)
+            if not method_summaries and performance.ranked_hardware:
+                method_summaries = [
+                    MethodPerformanceSummary(
+                        method=METHOD_FIXED_MATRIX_VECTOR_MULTIPLICATION,
+                        hardware_count=performance.hardware_count,
+                        ranked_hardware=list(performance.ranked_hardware),
+                    )
+                ]
 
-    def remove_worker(self, worker_id: int) -> Optional[WorkerInfo]:
-        """Remove a worker by ID."""
+            for method_summary in method_summaries:
+                for reported_hardware in method_summary.ranked_hardware:
+                    hardware_id = f"hardware:{self._next_hardware_id}"
+                    self._next_hardware_id += 1
+                    worker_hardware = WorkerHardwareCapability(
+                        hardware_id=hardware_id,
+                        worker_peer_id=peer_id,
+                        worker_runtime_id=runtime_id,
+                        worker_node_name=node_name,
+                        method=method_summary.method,
+                        hardware_type=reported_hardware.hardware_type,
+                        effective_gflops=reported_hardware.effective_gflops,
+                        rank=reported_hardware.rank,
+                    )
+                    self._worker_hardware[hardware_id] = worker_hardware
+                    connection.hardware_ids.append(hardware_id)
+                    self._total_effective_gflops += reported_hardware.effective_gflops
+        return connection
+
+    @trace_function
+    def register_client(
+        self,
+        node_name: str,
+        peer_address: str,
+        peer_port: int,
+        sock: socket.socket,
+    ) -> RuntimePeerConnection:
+        peer_id = f"client:{node_name}@{peer_address}:{peer_port}"
         with self._lock:
-            return self._workers.pop(worker_id, None)
+            runtime_id = f"client-{self._next_client_id}"
+            self._next_client_id += 1
+            connection = RuntimePeerConnection(
+                peer_id=peer_id,
+                runtime_id=runtime_id,
+                node_name=node_name,
+                role=RUNTIME_ROLE_CLIENT,
+                peer_address=peer_address,
+                peer_port=peer_port,
+                sock=sock,
+            )
+            self._clients[peer_id] = connection
+        return connection
 
-    def list_workers(self) -> list[WorkerInfo]:
-        """Return a snapshot of all registered workers."""
+    @trace_function
+    def remove_worker(self, peer_id: str) -> RuntimePeerConnection | None:
+        with self._lock:
+            connection = self._workers.pop(peer_id, None)
+            if connection is None:
+                return None
+
+            for hardware_id in connection.hardware_ids:
+                worker_hardware = self._worker_hardware.pop(hardware_id, None)
+                if worker_hardware is not None:
+                    self._total_effective_gflops -= worker_hardware.effective_gflops
+            return connection
+
+    @trace_function
+    def remove_client(self, peer_id: str) -> RuntimePeerConnection | None:
+        with self._lock:
+            return self._clients.pop(peer_id, None)
+
+    @trace_function
+    def remove(self, peer_id: str) -> RuntimePeerConnection | None:
+        with self._lock:
+            connection = self._workers.pop(peer_id, None)
+            if connection is not None:
+                for hardware_id in connection.hardware_ids:
+                    worker_hardware = self._worker_hardware.pop(hardware_id, None)
+                    if worker_hardware is not None:
+                        self._total_effective_gflops -= worker_hardware.effective_gflops
+                return connection
+            return self._clients.pop(peer_id, None)
+
+    @trace_function
+    def list_workers(self) -> list[RuntimePeerConnection]:
         with self._lock:
             return list(self._workers.values())
 
+    @trace_function
+    def list_clients(self) -> list[RuntimePeerConnection]:
+        with self._lock:
+            return list(self._clients.values())
+
+    @trace_function
+    def list_connections(self) -> list[RuntimePeerConnection]:
+        with self._lock:
+            return list(self._workers.values()) + list(self._clients.values())
+
+    @trace_function
+    def mark_heartbeat(self, peer_id: str, sent_at: float | None = None) -> None:
+        if sent_at is None:
+            sent_at = time.time()
+        with self._lock:
+            connection = self._workers.get(peer_id)
+            if connection is not None:
+                connection.last_heartbeat_at = sent_at
+
+    @trace_function
+    def mark_client_request(self, peer_id: str, sent_at: float | None = None) -> None:
+        if sent_at is None:
+            sent_at = time.time()
+        with self._lock:
+            connection = self._clients.get(peer_id)
+            if connection is not None:
+                connection.last_request_at = sent_at
+
+    @trace_function
+    def clear(self) -> list[RuntimePeerConnection]:
+        with self._lock:
+            items = list(self._workers.values()) + list(self._clients.values())
+            self._workers.clear()
+            self._clients.clear()
+            self._worker_hardware.clear()
+            self._total_effective_gflops = 0.0
+            return items
+
+    @trace_function
     def count_workers(self) -> int:
         with self._lock:
             return len(self._workers)
 
-    def allocate_slices(self, total_cout: int, main_gflops: float = 0.0) -> dict:
-        """Allocate Cout slices proportional to GFLOPS.
-
-        Returns dict: {worker_id: (start_oc, end_oc), 'main': (start_oc, end_oc)}
-        """
+    @trace_function
+    def count_clients(self) -> int:
         with self._lock:
-            workers = list(self._workers.values())
+            return len(self._clients)
 
-        # Build participants: workers + main node itself
-        participants = []
-        for w in workers:
-            participants.append(("worker", w.worker_id, w.gflops))
-        if main_gflops > 0:
-            participants.append(("main", 0, main_gflops))
-
-        if not participants:
-            return {"main": (0, total_cout)}
-
-        total_gflops = sum(g for _, _, g in participants)
-        if total_gflops <= 0:
-            # Equal split
-            chunk = total_cout // len(participants)
-            allocation = {}
-            oc = 0
-            for kind, wid, _ in participants:
-                end = oc + chunk
-                key = f"worker_{wid}" if kind == "worker" else "main"
-                allocation[key] = (oc, end)
-                oc = end
-            # Give remainder to last
-            last_key = list(allocation.keys())[-1]
-            allocation[last_key] = (allocation[last_key][0], total_cout)
-            return allocation
-
-        # Proportional split
-        allocation = {}
-        oc = 0
-        for i, (kind, wid, gflops) in enumerate(participants):
-            if oc >= total_cout:
-                break  # no more channels to assign
-            if i == len(participants) - 1:
-                end = total_cout  # last one gets remainder
-            else:
-                share = gflops / total_gflops
-                end = oc + max(1, round(total_cout * share))
-                end = min(end, total_cout)
-            key = f"worker_{wid}" if kind == "worker" else "main"
-            allocation[key] = (oc, end)
-            oc = end
-
-        # Update worker objects
+    @trace_function
+    def count(self) -> int:
         with self._lock:
-            for w in self._workers.values():
-                key = f"worker_{w.worker_id}"
-                if key in allocation:
-                    w.start_oc, w.end_oc = allocation[key]
+            return len(self._workers) + len(self._clients)
 
-        return allocation
+    @trace_function
+    def list_worker_hardware(self, method: str | None = None) -> list[WorkerHardwareCapability]:
+        with self._lock:
+            items = list(self._worker_hardware.values())
+        if method is None:
+            return items
+        return [item for item in items if item.method == method]
+
+    @trace_function
+    def count_registered_hardware(self) -> int:
+        with self._lock:
+            return len(self._worker_hardware)
+
+    @trace_function
+    def total_registered_gflops(self) -> float:
+        with self._lock:
+            return self._total_effective_gflops
+
+    @trace_function
+    def get_worker(self, peer_id: str) -> RuntimePeerConnection | None:
+        with self._lock:
+            return self._workers.get(peer_id)
+
+ComputeNodeRegistry = ClusterRegistry
+WorkerRegistry = ClusterRegistry
+

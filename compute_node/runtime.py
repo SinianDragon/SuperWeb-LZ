@@ -1,166 +1,235 @@
-"""Compute Node Runtime — connects to Main Node, receives work, executes, returns output."""
+"""Compute-node TCP runtime."""
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import socket
-import time
-from pathlib import Path
+from collections.abc import Callable
 
-from common.cluster_protocol import (
-    MSG_REGISTER, MSG_TASK_ASSIGN, MSG_WEIGHT_DATA,
-    MSG_START, MSG_OUTPUT_DATA, MSG_TASK_DONE, MSG_ALL_DONE, MSG_ERROR,
-    send_json, send_binary, recv_msg,
+from common.hardware import collect_hardware_profile
+from common.types import DiscoveryResult
+from compute_node.executor import TaskExecutionRouter
+from compute_node.handlers import build_default_method_handlers
+from compute_node.performance_summary import load_compute_performance_summary, load_runtime_processor_inventory
+from compute_node.heartbeat import WorkerHeartbeat
+from compute_node.session import WorkerSession
+from app.config import AppConfig
+from app.constants import (
+    METHOD_SPATIAL_CONVOLUTION,
+    RUNTIME_MSG_HEARTBEAT,
+    RUNTIME_MSG_HEARTBEAT_OK,
+    RUNTIME_MSG_TASK_ACCEPT,
+    RUNTIME_MSG_TASK_ASSIGN,
+    RUNTIME_MSG_TASK_FAIL,
+    RUNTIME_MSG_TASK_RESULT,
+    STATUS_ACCEPTED,
+    STATUS_INTERNAL_ERROR,
 )
-from compute_node.executor import run_computation, _get_best_backend, _get_best_gflops
-from constants import DEFAULT_TCP_PORT
-
-logger = logging.getLogger("superweb_cluster")
+from wire.runtime import (
+    MessageKind,
+    build_heartbeat_ok,
+    build_task_accept,
+    build_task_fail,
+    build_task_result,
+    describe_message_kind,
+)
+from app.trace_utils import trace_function
 
 
 class ComputeNodeRuntime:
-    """Full Compute-Node runtime: connect to Main, receive weight, compute, return output."""
+    """Connect to the main node and stay attached to the runtime session."""
 
-    def __init__(self, main_addr: str, config=None):
-        self.main_addr = main_addr  # IP or hostname of the main node
+    @trace_function
+    def __init__(
+        self,
+        config: AppConfig,
+        main_node_host: str,
+        main_node_port: int,
+        logger: logging.Logger,
+        should_stop: Callable[[], bool] | None = None,
+        session_factory: Callable[..., WorkerSession] | None = None,
+        task_executor_factory: Callable[..., TaskExecutionRouter] | None = None,
+    ) -> None:
         self.config = config
-        self.root = Path(__file__).resolve().parent.parent
-        self.dataset_dir = self.root / "compute_node" / "dataset" / "generated"
-        self.node_name = os.environ.get("COMPUTERNAME", socket.gethostname())
+        self.main_node_host = main_node_host
+        self.main_node_port = main_node_port
+        self.logger = logger
+        self.should_stop = should_stop or (lambda: False)
+        self.heartbeat_state = WorkerHeartbeat()
+        self._session_factory = session_factory or WorkerSession
+        self._task_executor_factory = task_executor_factory or (lambda: TaskExecutionRouter(build_default_method_handlers()))
 
-    def run(self) -> dict:
-        """Main entry point. Connects to main node and executes assigned work."""
-        tcp_port = DEFAULT_TCP_PORT
-        best_backend = _get_best_backend()
-        best_gflops = _get_best_gflops()
-
-        logger.info(f"Connecting to Main Node at {self.main_addr}:{tcp_port}...")
-        logger.info(f"  Local benchmark: {best_backend.upper()} @ {best_gflops:.1f} GFLOPS")
-
-        # ─── Connect to Main Node ────────────────────────────────────────
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(30.0)
-
-        try:
-            sock.connect((self.main_addr, tcp_port))
-        except Exception as exc:
-            logger.error(f"Cannot connect to Main Node: {exc}")
-            return {"error": str(exc)}
-
-        try:
-            return self._execute_workflow(sock, best_backend, best_gflops)
-        except Exception as exc:
-            logger.error(f"Workflow failed: {exc}")
-            return {"error": str(exc)}
-        finally:
-            try:
-                sock.close()
-            except Exception:
-                pass
-
-    def _execute_workflow(self, sock: socket.socket, backend: str, gflops: float) -> dict:
-        """Execute the full compute node workflow."""
-
-        # ─── Step 1: Register ────────────────────────────────────────────
-        send_json(sock, MSG_REGISTER, {
-            "node_name": self.node_name,
-            "gflops": gflops,
-            "backend": backend,
-        })
-        logger.info("Registration sent, waiting for task assignment...")
-
-        # ─── Step 2: Receive TASK_ASSIGN ─────────────────────────────────
-        msg_type, payload = recv_msg(sock)
-        if msg_type != MSG_TASK_ASSIGN:
-            raise RuntimeError(f"Expected TASK_ASSIGN, got type={msg_type}")
-
-        task = json.loads(payload.decode("utf-8"))
-        worker_id = task["worker_id"]
-        start_oc = task["start_oc"]
-        end_oc = task["end_oc"]
-        h, w = task["h"], task["w"]
-        c_in, c_out = task["c_in"], task["c_out"]
-        k, pad = task["k"], task["pad"]
-        slice_cout = end_oc - start_oc
-
-        logger.info(f"Assigned: worker #{worker_id}, oc=[{start_oc},{end_oc}), "
-                     f"scale={h}x{w}, slice_cout={slice_cout}")
-
-        # ─── Step 3: Receive WEIGHT_DATA ─────────────────────────────────
-        msg_type, weight_data = recv_msg(sock)
-        if msg_type != MSG_WEIGHT_DATA:
-            raise RuntimeError(f"Expected WEIGHT_DATA, got type={msg_type}")
-
-        weight_mb = len(weight_data) / 1048576
-        logger.info(f"Received weight data: {weight_mb:.1f} MB")
-
-        # Save weight slice to file
-        weight_path = self.dataset_dir / f"runtime_weight_{worker_id}.bin"
-        weight_path.write_bytes(weight_data)
-
-        # ─── Step 4: Wait for START signal ───────────────────────────────
-        msg_type, _ = recv_msg(sock)
-        if msg_type != MSG_START:
-            raise RuntimeError(f"Expected START, got type={msg_type}")
-
-        logger.info("START signal received. Executing computation...")
-
-        # ─── Step 5: Execute computation ─────────────────────────────────
-        input_path = self.dataset_dir / "runtime_input.bin"
-        output_path = self.dataset_dir / f"runtime_output_{worker_id}.bin"
-
-        start_time = time.perf_counter()
-
-        result = run_computation(
-            backend_name=backend,
-            h=h, w=w, c_in=c_in, c_out=c_out,
-            k=k, pad=pad,
-            input_path=input_path,
-            weight_path=weight_path,
-            output_path=output_path,
-            start_oc=start_oc, end_oc=end_oc,
-            logger=logger,
+    @trace_function
+    def _build_session(self) -> WorkerSession:
+        return self._session_factory(
+            self.main_node_host,
+            self.main_node_port,
+            connect_timeout=self.config.tcp_connect_timeout,
+            socket_timeout=self.config.runtime_socket_timeout,
+            max_message_size=self.config.max_message_size,
         )
 
-        elapsed = time.perf_counter() - start_time
-        logger.info(f"Computation done: {elapsed:.2f}s, "
-                     f"{result.effective_gflops:.1f} GFLOPS, "
-                     f"checksum={result.checksum}")
-
-        # ─── Step 6: Send TASK_DONE ──────────────────────────────────────
-        send_json(sock, MSG_TASK_DONE, {
-            "worker_id": worker_id,
-            "elapsed_seconds": elapsed,
-            "effective_gflops": result.effective_gflops,
-            "checksum": result.checksum,
-        })
-
-        # ─── Step 7: Send OUTPUT_DATA ────────────────────────────────────
-        output_data = output_path.read_bytes()
-        send_binary(sock, MSG_OUTPUT_DATA, output_data)
-        logger.info(f"Sent output: {len(output_data)/1048576:.1f} MB")
-
-        # Cleanup worker-specific temp files
-        for p in [weight_path, output_path]:
-            if p.exists():
-                p.unlink()
-
-        # ─── Step 8: Wait for ALL_DONE ───────────────────────────────────
+    @trace_function
+    def run(self) -> DiscoveryResult:
+        session = self._build_session()
+        task_executor = None
         try:
-            msg_type, _ = recv_msg(sock)
-            if msg_type == MSG_ALL_DONE:
-                logger.info("ALL_DONE received. Shutting down.")
-        except Exception:
-            logger.info("Main node disconnected.")
+            hardware = collect_hardware_profile(self.main_node_host, self.main_node_port)
+            legacy_inventory = load_runtime_processor_inventory()
+            performance = legacy_inventory.to_legacy_summary()
+            multi_method_summary = load_compute_performance_summary()
+            if multi_method_summary.method_summaries:
+                performance = multi_method_summary
+            try:
+                task_executor = self._task_executor_factory()
+            except TypeError:
+                # Backward compatibility for older tests/factories that still
+                # expect one inventory-like constructor argument.
+                task_executor = self._task_executor_factory(None)
+            session.connect()
+            register_ok = session.register(self.config.node_name, hardware, performance)
+            assigned_node_id = register_ok.node_id or self.config.node_name
 
-        return {
-            "mode": "compute",
-            "worker_id": worker_id,
-            "start_oc": start_oc,
-            "end_oc": end_oc,
-            "elapsed_seconds": elapsed,
-            "effective_gflops": result.effective_gflops,
-            "checksum": result.checksum,
-        }
+            print(
+                f"Connected to main node {register_ok.main_node_name} "
+                f"at {register_ok.main_node_ip}:{register_ok.main_node_port} "
+                f"assigned_node_id={assigned_node_id}",
+                flush=True,
+            )
+            print(
+                f"Registered compute node {self.config.node_name} "
+                f"with cpu={hardware.logical_cpu_count} memory_bytes={hardware.memory_bytes}",
+                flush=True,
+            )
+            print(
+                "Reported compute methods "
+                f"count={len(performance.method_summaries) or 1} "
+                f"methods={[summary.method for summary in performance.method_summaries] or ['fixed_matrix_vector_multiplication']}",
+                flush=True,
+            )
+
+            while not self.should_stop():
+                try:
+                    message = session.receive()
+                except socket.timeout:
+                    continue
+
+                if message is None:
+                    return DiscoveryResult(
+                        success=False,
+                        peer_address=self.main_node_host,
+                        peer_port=self.main_node_port,
+                        source="compute_node",
+                        message="Main node closed the TCP session.",
+                    )
+
+                if message.kind == MessageKind.HEARTBEAT and message.heartbeat is not None:
+                    self.heartbeat_state.respond(message.heartbeat)
+                    session.send(
+                        build_heartbeat_ok(
+                            node_name=self.config.node_name,
+                            heartbeat_unix_time_ms=message.heartbeat.unix_time_ms,
+                        )
+                    )
+                    print(
+                        f"{RUNTIME_MSG_HEARTBEAT} from {message.heartbeat.main_node_name} "
+                        f"at {message.heartbeat.unix_time_ms}",
+                        flush=True,
+                    )
+                    print(
+                        f"{RUNTIME_MSG_HEARTBEAT_OK} from {self.config.node_name} "
+                        f"for {message.heartbeat.unix_time_ms}",
+                        flush=True,
+                    )
+                    continue
+
+                if message.kind == MessageKind.TASK_ASSIGN and message.task_assign is not None:
+                    task = message.task_assign
+                    session.send(
+                        build_task_accept(
+                            request_id=task.request_id,
+                            node_id=assigned_node_id,
+                            task_id=task.task_id,
+                            status_code=STATUS_ACCEPTED,
+                        )
+                    )
+                    print(
+                        f"{RUNTIME_MSG_TASK_ACCEPT} from {self.config.node_name} "
+                        f"id={assigned_node_id} task_id={task.task_id} "
+                        f"method={task.method} "
+                        f"rows={task.row_start}:{task.row_end} "
+                        f"oc={task.start_oc}:{task.end_oc} "
+                        f"iteration_count={task.iteration_count}",
+                        flush=True,
+                    )
+                    try:
+                        task_result = task_executor.execute_task(task)
+                    except (OSError, RuntimeError, ValueError) as exc:
+                        session.send(
+                            build_task_fail(
+                                request_id=task.request_id,
+                                node_id=assigned_node_id,
+                                task_id=task.task_id,
+                                status_code=STATUS_INTERNAL_ERROR,
+                                error_message=str(exc),
+                            )
+                        )
+                        print(
+                            f"{RUNTIME_MSG_TASK_FAIL} from {self.config.node_name} "
+                            f"id={assigned_node_id} task_id={task.task_id} error={exc}",
+                            flush=True,
+                        )
+                        continue
+
+                    session.send(
+                        build_task_result(
+                            request_id=task_result.request_id,
+                            node_id=assigned_node_id,
+                            task_id=task_result.task_id,
+                            status_code=task_result.status_code,
+                            row_start=task_result.row_start,
+                            row_end=task_result.row_end,
+                            output_vector=task_result.output_vector,
+                            iteration_count=task_result.iteration_count,
+                            start_oc=task_result.start_oc,
+                            end_oc=task_result.end_oc,
+                            output_h=task_result.output_h,
+                            output_w=task_result.output_w,
+                            result_artifact_id=task_result.result_artifact_id,
+                        )
+                    )
+                    result_scope = (
+                        f"oc={task_result.start_oc}:{task_result.end_oc}"
+                        if task.method == METHOD_SPATIAL_CONVOLUTION
+                        else f"rows={task_result.row_start}:{task_result.row_end}"
+                    )
+                    print(
+                        f"{RUNTIME_MSG_TASK_RESULT} from {self.config.node_name} "
+                        f"id={assigned_node_id} task_id={task.task_id} "
+                        f"method={task.method} {result_scope} "
+                        f"iteration_count={task_result.iteration_count}",
+                        flush=True,
+                    )
+                    continue
+
+                self.logger.warning("Ignoring unexpected runtime message kind=%s", describe_message_kind(message.kind))
+
+            return DiscoveryResult(
+                success=True,
+                peer_address=self.main_node_host,
+                peer_port=self.main_node_port,
+                source="compute_node",
+                message="Compute-node runtime stopped.",
+            )
+        except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
+            return DiscoveryResult(
+                success=False,
+                peer_address=self.main_node_host,
+                peer_port=self.main_node_port,
+                source="compute_node",
+                message=f"Unable to join main-node TCP runtime: {exc}.",
+            )
+        finally:
+            if task_executor is not None and hasattr(task_executor, "close"):
+                task_executor.close()
+            session.close()

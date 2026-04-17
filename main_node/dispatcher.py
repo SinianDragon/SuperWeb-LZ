@@ -1,68 +1,111 @@
-"""Task dispatcher — orchestrates local and distributed computation."""
+"""Task planning helpers for the main-node runtime."""
 
 from __future__ import annotations
 
-import json
-import time
-from pathlib import Path
+from dataclasses import dataclass
 
-from compute_node.executor import run_computation, _get_best_backend, _get_best_gflops
-from compute_node.performance_metrics.workloads import get_runtime_spec
+from app.constants import METHOD_FIXED_MATRIX_VECTOR_MULTIPLICATION, METHOD_SPATIAL_CONVOLUTION
+from common.work_partition import partition_contiguous_range
+from main_node.registry import RuntimePeerConnection, WorkerHardwareCapability
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerTaskSlice:
+    """One worker plus the slice it should compute."""
+
+    connection: RuntimePeerConnection
+    task_id: str
+    row_start: int
+    row_end: int
+    effective_gflops: float
+    method: str = METHOD_FIXED_MATRIX_VECTOR_MULTIPLICATION
+    start_oc: int = 0
+    end_oc: int = 0
 
 
 class TaskDispatcher:
-    def __init__(self, registry, logger):
-        self.registry = registry
-        self.logger = logger
-        self.runtime_spec = get_runtime_spec()
-        self.root = Path(__file__).resolve().parent.parent
+    """Build weighted worker row assignments from the registered hardware inventory."""
 
-    def _get_best_backend_name(self) -> str:
-        return _get_best_backend()
+    def dispatch_fixed_matrix_vector_multiplication(
+        self,
+        *,
+        request_id: str,
+        rows: int,
+        workers: list[RuntimePeerConnection],
+        worker_hardware: list[WorkerHardwareCapability],
+    ) -> list[WorkerTaskSlice]:
+        worker_gflops: dict[str, float] = {worker.peer_id: 0.0 for worker in workers}
+        for hardware in worker_hardware:
+            worker_gflops[hardware.worker_peer_id] = worker_gflops.get(hardware.worker_peer_id, 0.0) + hardware.effective_gflops
 
-    def _get_best_gflops(self) -> float:
-        return _get_best_gflops()
+        schedulable_workers = [worker for worker in workers if worker_gflops.get(worker.peer_id, 0.0) > 0.0]
+        if not schedulable_workers:
+            return []
 
-    def run_locally(self) -> dict:
-        """Execute the full computation locally using the best backend."""
-        spec = self.runtime_spec
-        dataset_dir = self.root / "compute_node" / "dataset" / "generated"
-        input_path = dataset_dir / "runtime_input.bin"
-        weight_path = dataset_dir / "runtime_weight.bin"
-        output_path = dataset_dir / "runtime_output.bin"
-
-        backend_name = self._get_best_backend_name()
-        self.logger.info(f"Local execution: backend={backend_name.upper()}, "
-                         f"scale={spec.h}x{spec.w}, cin={spec.c_in}, cout={spec.c_out}")
-
-        start = time.perf_counter()
-
-        result = run_computation(
-            backend_name=backend_name,
-            h=spec.h, w=spec.w, c_in=spec.c_in, c_out=spec.c_out,
-            k=spec.k, pad=spec.pad,
-            input_path=input_path,
-            weight_path=weight_path,
-            output_path=output_path,
-            start_oc=0, end_oc=spec.c_out,
-            logger=self.logger,
+        partitions = partition_contiguous_range(
+            0,
+            rows,
+            [worker_gflops[worker.peer_id] for worker in schedulable_workers],
         )
 
-        total_elapsed = time.perf_counter() - start
-        output_mb = output_path.stat().st_size / 1048576 if output_path.exists() else 0
+        assignments: list[WorkerTaskSlice] = []
+        for partition, worker in zip(partitions, schedulable_workers):
+            if partition.end <= partition.start:
+                continue
+            assignments.append(
+                WorkerTaskSlice(
+                    connection=worker,
+                    task_id=f"{request_id}:{worker.peer_id}",
+                    method=METHOD_FIXED_MATRIX_VECTOR_MULTIPLICATION,
+                    row_start=partition.start,
+                    row_end=partition.end,
+                    effective_gflops=worker_gflops[worker.peer_id],
+                )
+            )
+        return assignments
 
-        self.logger.info(
-            f"Local execution complete: {total_elapsed:.2f}s total, "
-            f"{result.effective_gflops:.1f} GFLOPS, "
-            f"output={output_mb:.1f} MB, checksum={result.checksum}"
+    def dispatch_spatial_convolution(
+        self,
+        *,
+        request_id: str,
+        output_channels: int,
+        workers: list[RuntimePeerConnection],
+        worker_hardware: list[WorkerHardwareCapability],
+        max_channels_per_task: int | None = None,
+    ) -> list[WorkerTaskSlice]:
+        worker_gflops: dict[str, float] = {worker.peer_id: 0.0 for worker in workers}
+        for hardware in worker_hardware:
+            worker_gflops[hardware.worker_peer_id] = worker_gflops.get(hardware.worker_peer_id, 0.0) + hardware.effective_gflops
+
+        schedulable_workers = [worker for worker in workers if worker_gflops.get(worker.peer_id, 0.0) > 0.0]
+        if not schedulable_workers:
+            return []
+
+        partitions = partition_contiguous_range(
+            0,
+            output_channels,
+            [worker_gflops[worker.peer_id] for worker in schedulable_workers],
         )
 
-        return {
-            "mode": "local",
-            "backend": result.backend,
-            "elapsed_seconds": total_elapsed,
-            "effective_gflops": result.effective_gflops,
-            "checksum": result.checksum,
-            "output_path": str(output_path),
-            "output_size_mb": output_mb,
-        }
+        assignments: list[WorkerTaskSlice] = []
+        for partition, worker in zip(partitions, schedulable_workers):
+            if partition.end <= partition.start:
+                continue
+            chunk_size = max_channels_per_task or (partition.end - partition.start)
+            chunk_index = 0
+            for start_oc in range(partition.start, partition.end, chunk_size):
+                end_oc = min(start_oc + chunk_size, partition.end)
+                assignments.append(
+                    WorkerTaskSlice(
+                        connection=worker,
+                        task_id=f"{request_id}:{worker.peer_id}:{chunk_index}",
+                        method=METHOD_SPATIAL_CONVOLUTION,
+                        row_start=0,
+                        row_end=0,
+                        start_oc=start_oc,
+                        end_oc=end_oc,
+                        effective_gflops=worker_gflops[worker.peer_id],
+                    )
+                )
+                chunk_index += 1
+        return assignments

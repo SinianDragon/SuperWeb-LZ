@@ -5,8 +5,8 @@ from __future__ import annotations
 import subprocess
 
 from common.types import FirewallStatus
-from constants import WINDOWS_FIREWALL_RULE_NAME
-from trace_utils import trace_function
+from app.constants import WINDOWS_FIREWALL_RULE_NAME
+from app.trace_utils import trace_function
 
 
 def _inbound_rule_name() -> str:

@@ -27,11 +27,7 @@ def to_relative_string(path: Path | str, *, start: Path | None = None) -> str:
     if not candidate.is_absolute():
         return str(candidate).replace("\\", "/")
 
-    try:
-        relative = os.path.relpath(str(candidate), str(base))
-    except ValueError:
-        # Windows: paths on different drives (e.g. C: vs D:)
-        return str(candidate).replace("\\", "/")
+    relative = os.path.relpath(str(candidate), str(base))
     return relative.replace("\\", "/")
 
 
@@ -47,11 +43,7 @@ def to_relative_cli_path(path: Path | str, *, start: Path | None = None) -> str:
     if not candidate.is_absolute():
         return str(candidate)
 
-    try:
-        return os.path.relpath(str(candidate), str(base))
-    except ValueError:
-        # Windows: paths on different drives (e.g. C: vs D:)
-        return str(candidate)
+    return os.path.relpath(str(candidate), str(base))
 
 
 def to_relative_executable_path(path: Path | str, *, start: Path | None = None) -> str:
