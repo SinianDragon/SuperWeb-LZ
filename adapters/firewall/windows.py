@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 
 from common.types import FirewallStatus
 from app.constants import WINDOWS_FIREWALL_RULE_NAME
@@ -18,7 +19,7 @@ def _outbound_rule_name() -> str:
 
 
 def _run_firewall_command(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, capture_output=True, text=True, check=False)
+    return subprocess.run(command, capture_output=True, text=True, errors="replace", check=False)
 
 
 @trace_function
@@ -62,6 +63,19 @@ def ensure_rules(discovery_port: int, is_admin_user: bool) -> FirewallStatus:
             "action=allow",
             "protocol=UDP",
             f"remoteport={discovery_port}",
+            "profile=any",
+        ],
+        [
+            "netsh",
+            "advfirewall",
+            "firewall",
+            "add",
+            "rule",
+            f"name={_inbound_rule_name()}-App",
+            "dir=in",
+            "action=allow",
+            "protocol=UDP",
+            f"program={sys.executable}",
             "profile=any",
         ],
     ]
@@ -118,6 +132,14 @@ def cleanup_rules(discovery_port: int, is_admin_user: bool) -> FirewallStatus:
             "delete",
             "rule",
             f"name={_outbound_rule_name()}",
+        ],
+        [
+            "netsh",
+            "advfirewall",
+            "firewall",
+            "delete",
+            "rule",
+            f"name={_inbound_rule_name()}-App",
         ],
     ]
 
