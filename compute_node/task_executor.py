@@ -76,7 +76,7 @@ class _Dx12ResidentRunner:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             encoding="utf-8",
             bufsize=1,
         )
@@ -271,7 +271,7 @@ class FixedMatrixVectorTaskExecutor:
                 command,
                 check=True,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 cwd=FMVM_METHOD_DIR,
                 timeout=300.0,
             )

@@ -480,7 +480,7 @@ class CpuBackend:
             command,
             check=True,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=timeout_seconds,
             cwd=ROOT_DIR,
         )
@@ -601,7 +601,7 @@ class CpuBackend:
                 f"& '{compile_script_path}'",
             ],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         if completed.returncode != 0:
             raise subprocess.CalledProcessError(
@@ -638,7 +638,7 @@ class CpuBackend:
                 ],
             cwd=artifacts.build_dir,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         if completed.returncode != 0:
             raise subprocess.CalledProcessError(
@@ -667,7 +667,7 @@ class CpuBackend:
         completed = subprocess.run(
             ["otool", "-L", str(executable_path)],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         if completed.returncode != 0:
             return "macOS CPU linkage inspection failed; full static linkage is not expected on Apple toolchains."
@@ -719,7 +719,7 @@ class CpuBackend:
                     "Common7\\Tools\\VsDevCmd.bat",
                 ],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
             if completed.returncode == 0:
                 resolved = completed.stdout.strip().splitlines()

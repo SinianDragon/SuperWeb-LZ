@@ -112,7 +112,7 @@ class CudaBackend:
         subprocess_timeout = max(time_budget_seconds * 20, 180.0)
 
         try:
-            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=subprocess_timeout, cwd=ROOT_DIR)
+            completed = subprocess.run(command, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=subprocess_timeout, cwd=ROOT_DIR)
             metrics = json.loads(completed.stdout)
         except subprocess.TimeoutExpired:
             notes.append(f"CUDA benchmark timed out after {subprocess_timeout:.0f}s")

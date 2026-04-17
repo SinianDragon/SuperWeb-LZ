@@ -217,7 +217,7 @@ class SpatialConvolutionTaskExecutor:
                 cmd,
                 check=True,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 cwd=PERF_DIR,
                 timeout=900.0,
             )

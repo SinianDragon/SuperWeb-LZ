@@ -407,7 +407,7 @@ class Dx12Backend:
                 command,
                 check=True,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 timeout=timeout_seconds,
                 cwd=ROOT_DIR,
             )
@@ -556,7 +556,7 @@ class Dx12Backend:
                 f"& '{compile_script_path}'",
             ],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         if completed.returncode != 0:
             raise subprocess.CalledProcessError(
@@ -589,7 +589,7 @@ class Dx12Backend:
                     "Common7\\Tools\\VsDevCmd.bat",
                 ],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
             if completed.returncode == 0:
                 resolved = completed.stdout.strip().splitlines()

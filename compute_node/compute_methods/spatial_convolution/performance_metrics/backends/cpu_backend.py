@@ -305,7 +305,7 @@ class CpuBackend:
             command,
             check=True,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=timeout_seconds,
             cwd=ROOT_DIR,
         )
@@ -338,11 +338,11 @@ class CpuBackend:
         compile_script_path.write_text(
             "\n".join(["@echo off", *_windows_vsdevcmd_setup_lines(), "pushd \"%~dp0\"", f"cl /nologo /std:c++20 /O2 /fp:fast /MT /EHsc /Fe:{artifacts.executable_path.name} ..\\{artifacts.source_path.name}", "set \"BUILD_EXIT=%ERRORLEVEL%\"", "popd", "exit /b %BUILD_EXIT%"]) + "\n", encoding="ascii"
         )
-        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"& '{compile_script_path}'"], capture_output=True, text=True, check=True)
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"& '{compile_script_path}'"], capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
 
     def _compile_macos_runner(self, artifacts: CpuArtifacts) -> None:
         compiler = self._find_macos_cpp_compiler()
-        subprocess.run([compiler, f"../{artifacts.source_path.name}", "-std=c++20", "-O3", "-ffast-math", "-fvisibility=hidden", "-fvisibility-inlines-hidden", "-pthread", "-Wl,-dead_strip", "-Wl,-dead_strip_dylibs", "-o", artifacts.executable_path.name], cwd=artifacts.build_dir, capture_output=True, text=True, check=True)
+        subprocess.run([compiler, f"../{artifacts.source_path.name}", "-std=c++20", "-O3", "-ffast-math", "-fvisibility=hidden", "-fvisibility-inlines-hidden", "-pthread", "-Wl,-dead_strip", "-Wl,-dead_strip_dylibs", "-o", artifacts.executable_path.name], cwd=artifacts.build_dir, capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
 
     def _can_build_for_artifacts(self, artifacts: CpuArtifacts) -> tuple[bool, str]:
         return True, ""

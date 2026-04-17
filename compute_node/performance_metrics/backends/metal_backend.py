@@ -79,7 +79,7 @@ class MetalBackend:
         ]
 
         try:
-            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=max(time_budget_seconds, 30.0), cwd=ROOT_DIR)
+            completed = subprocess.run(command, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=max(time_budget_seconds, 30.0), cwd=ROOT_DIR)
             metrics = json.loads(completed.stdout)
         except Exception as exc:
             notes.append("Metal benchmark failed or timed out")

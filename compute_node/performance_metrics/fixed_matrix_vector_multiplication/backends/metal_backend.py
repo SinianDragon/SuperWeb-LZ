@@ -88,7 +88,7 @@ def _find_xcrun_tool(tool_name: str) -> str | None:
     completed = subprocess.run(
         ["xcrun", "--find", tool_name],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
     if completed.returncode != 0:
         return None
@@ -411,7 +411,7 @@ class MetalBackend:
             command,
             check=True,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=timeout_seconds,
             cwd=ROOT_DIR,
         )
@@ -453,7 +453,7 @@ class MetalBackend:
             cwd=METAL_BUILD_DIR,
             check=True,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         subprocess.run(
             [
@@ -468,7 +468,7 @@ class MetalBackend:
             cwd=METAL_BUILD_DIR,
             check=True,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         subprocess.run(
             [
@@ -491,7 +491,7 @@ class MetalBackend:
             cwd=METAL_BUILD_DIR,
             check=True,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         return (
             METAL_EXECUTABLE_PATH,
@@ -517,7 +517,7 @@ class MetalBackend:
         completed = subprocess.run(
             ["otool", "-L", str(executable_path)],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         if completed.returncode != 0:
             return (

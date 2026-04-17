@@ -212,7 +212,7 @@ def _run_spatial_convolution_benchmark(args: argparse.Namespace) -> dict[str, ob
                 cwd=PROJECT_ROOT,
                 timeout=3600.0,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
         except subprocess.CalledProcessError as exc:
             stderr = (exc.stderr or "").strip()

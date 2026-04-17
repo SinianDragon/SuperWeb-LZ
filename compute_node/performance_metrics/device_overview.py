@@ -20,7 +20,7 @@ def _run_powershell_json(script: str) -> Any | None:
     completed = subprocess.run(
         ["powershell", "-NoProfile", "-Command", script],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         timeout=5.0,
     )
     if completed.returncode != 0:

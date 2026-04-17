@@ -1,12 +1,12 @@
 {
   "schema_version": 5,
-  "generated_at_unix": 1776385309.5570364,
-  "benchmark_elapsed_seconds": 0.6679695000000265,
+  "generated_at_unix": 1776385966.271643,
+  "benchmark_elapsed_seconds": 102.72716910000008,
   "device_overview": {
     "system": "Windows",
     "release": "11",
     "machine": "AMD64",
-    "python_version": "3.14.0",
+    "python_version": "3.12.7",
     "cpu": {
       "name": "Intel(R) Core(TM) Ultra 9 275HX",
       "logical_cpu_count": 24
@@ -45,39 +45,39 @@
     "fixed_matrix_vector_multiplication": {
       "method": "fixed_matrix_vector_multiplication",
       "display_name": "Fixed Matrix-Vector Multiplication",
-      "generated_at_unix": 1776385307.8526747,
-      "benchmark_elapsed_seconds": 0.03054840000004333,
+      "generated_at_unix": 1776385887.3376834,
+      "benchmark_elapsed_seconds": 7.765031200000067,
       "dataset": {
-        "root_dir": "tmp1gp8a8bj/generated/overrides/8x16",
+        "root_dir": "compute_node/input_matrix/fixed_matrix_vector_multiplication/generated",
         "artifacts": {
-          "autotune_matrix": "tmp1gp8a8bj/generated/overrides/8x16/test_A.bin",
-          "autotune_vector": "tmp1gp8a8bj/generated/overrides/8x16/test_x.bin",
-          "measurement_matrix": "tmp1gp8a8bj/generated/overrides/8x16/test_A.bin",
-          "measurement_vector": "tmp1gp8a8bj/generated/overrides/8x16/test_x.bin"
+          "autotune_matrix": "compute_node/input_matrix/fixed_matrix_vector_multiplication/generated/test_A.bin",
+          "autotune_vector": "compute_node/input_matrix/fixed_matrix_vector_multiplication/generated/test_x.bin",
+          "measurement_matrix": "compute_node/input_matrix/fixed_matrix_vector_multiplication/generated/runtime_A.bin",
+          "measurement_vector": "compute_node/input_matrix/fixed_matrix_vector_multiplication/generated/runtime_x.bin"
         },
         "shape": {
           "autotune": {
-            "rows": 8,
-            "cols": 16
+            "rows": 2048,
+            "cols": 4096
           },
           "measurement": {
-            "rows": 8,
-            "cols": 16
+            "rows": 16384,
+            "cols": 32768
           }
         },
         "bytes": {
-          "autotune_matrix": 512,
-          "autotune_vector": 64,
-          "measurement_matrix": 512,
-          "measurement_vector": 64
+          "autotune_matrix": 33554432,
+          "autotune_vector": 16384,
+          "measurement_matrix": 2147483648,
+          "measurement_vector": 131072
         },
         "generated": true
       },
       "workload": {
         "autotune_plan": {
-          "name": "fixed-fmvm-8x16",
-          "rows": 8,
-          "cols": 16,
+          "name": "fixed-fmvm-2048x4096",
+          "rows": 2048,
+          "cols": 4096,
           "autotune_repeats": 3,
           "selection_metric": "autotune_average_latency",
           "input_dtype": "fp32",
@@ -85,38 +85,42 @@
           "accumulation_precision": "fp32"
         },
         "measurement_plan": {
-          "name": "fixed-fmvm-8x16",
-          "rows": 8,
-          "cols": 16,
-          "measurement_repeats": 20,
+          "name": "fixed-fmvm-16384x32768",
+          "rows": 16384,
+          "cols": 32768,
+          "measurement_repeats": 1,
           "reported_metric": "measurement_average_latency",
           "cross_backend_validation": "fp32_tolerance",
-          "full_runtime_measurement": false
+          "full_runtime_measurement": true
         }
       },
       "backends_considered": [
-        "cpu"
+        "cpu",
+        "cuda"
       ],
       "detected_backends": [
-        "cpu"
+        "cpu",
+        "cuda"
       ],
       "usable_backends": [
-        "cpu"
+        "cpu",
+        "cuda"
       ],
       "ranking": [
+        "cuda",
         "cpu"
       ],
-      "best_backend": "cpu",
+      "best_backend": "cuda",
       "backends": {
         "cpu": {
           "backend": "cpu",
           "available": true,
           "device_name": "Intel(R) Core(TM) Ultra 9 275HX",
-          "rank": 1,
+          "rank": 2,
           "autotune_plan": {
             "autotune_repeats": 3,
-            "measurement_repeats": 20,
-            "trials_run": 5,
+            "measurement_repeats": 1,
+            "trials_run": 25,
             "search_space": {
               "workers": [
                 24,
@@ -126,35 +130,102 @@
                 96
               ],
               "tile_size": [
-                16
+                256,
+                512,
+                1024,
+                2048,
+                4096
               ]
             }
           },
           "autotune_result": {
-            "wall_clock_latency_seconds": 0.000195833,
-            "effective_gflops": 0.001307234,
-            "checksum": "fnv1a64:58a194d3022d8895",
+            "wall_clock_latency_seconds": 0.000494567,
+            "effective_gflops": 33.923062614,
+            "checksum": "fnv1a64:fd2c005dc34d5b14",
             "score": 1000.0
           },
           "best_config": {
             "workers": 6,
             "requested_workers": 6,
-            "tile_size": 16,
+            "tile_size": 1024,
             "accumulation_precision": "fp32",
             "autotune_repeats": 3,
-            "measurement_repeats": 20,
-            "trials_run": 5
+            "measurement_repeats": 1,
+            "trials_run": 25
           },
           "best_result": {
-            "wall_clock_latency_seconds": 0.000275785,
-            "effective_gflops": 0.000928259,
-            "checksum": "fnv1a64:58a194d3022d8895",
+            "wall_clock_latency_seconds": 0.0367326,
+            "effective_gflops": 29.231304727,
+            "checksum": "fnv1a64:3bd01bdbe48bcf9f",
             "score": 1000.0
           },
           "notes": [
             "self-contained binary",
-            "prebuilt runner"
+            "prebuilt runner",
+            "test autotune, runtime measurement"
           ]
+        },
+        "cuda": {
+          "backend": "cuda",
+          "available": true,
+          "device_name": "NVIDIA GeForce RTX 5080 Laptop GPU",
+          "rank": 1,
+          "autotune_plan": {
+            "autotune_repeats": 3,
+            "measurement_repeats": 1,
+            "trials_run": 32,
+            "search_space": {
+              "transpose": [
+                0,
+                1
+              ],
+              "block_size": [
+                64,
+                128,
+                256,
+                512
+              ],
+              "tile_size": [
+                1,
+                2,
+                4,
+                8
+              ]
+            }
+          },
+          "autotune_result": {
+            "wall_clock_latency_seconds": 1.6128e-05,
+            "effective_gflops": 1040.253976512,
+            "checksum": "fnv1a64:efa8c956f772b98b",
+            "score": 1000.0
+          },
+          "best_config": {
+            "transpose": false,
+            "block_size": 64,
+            "tile_size": 8,
+            "accumulation_precision": "fp32",
+            "autotune_repeats": 3,
+            "measurement_repeats": 1,
+            "trials_run": 32
+          },
+          "best_result": {
+            "wall_clock_latency_seconds": 0.002522688,
+            "effective_gflops": 425.63403063,
+            "checksum": "fnv1a64:df4403c2b10ca994",
+            "score": 1000.0
+          },
+          "notes": [
+            "binary available",
+            "self-contained binary",
+            "test autotune, runtime measurement"
+          ],
+          "cuda_environment": {
+            "detected_architecture": "Blackwell",
+            "sm_version": "sm_120",
+            "driver_version": "595.97",
+            "nvcc_version": "13.2",
+            "binary_status": "available"
+          }
         }
       }
     }

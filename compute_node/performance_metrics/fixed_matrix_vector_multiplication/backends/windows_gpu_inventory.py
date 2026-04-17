@@ -48,7 +48,7 @@ def list_windows_display_adapters() -> tuple[list[dict[str, str]], str]:
             ),
         ],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "").strip()
