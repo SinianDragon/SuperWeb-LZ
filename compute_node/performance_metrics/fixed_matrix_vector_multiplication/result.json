@@ -1,0 +1,162 @@
+{
+  "schema_version": 5,
+  "generated_at_unix": 1776385309.5570364,
+  "benchmark_elapsed_seconds": 0.6679695000000265,
+  "device_overview": {
+    "system": "Windows",
+    "release": "11",
+    "machine": "AMD64",
+    "python_version": "3.14.0",
+    "cpu": {
+      "name": "Intel(R) Core(TM) Ultra 9 275HX",
+      "logical_cpu_count": 24
+    },
+    "memory": {
+      "total_bytes": 34359738368,
+      "modules": [
+        {
+          "capacity_bytes": 17179869184,
+          "configured_clock_mhz": 5600,
+          "manufacturer": "SK Hynix",
+          "part_number": "HMCG78AGBSA095N"
+        },
+        {
+          "capacity_bytes": 17179869184,
+          "configured_clock_mhz": 5600,
+          "manufacturer": "SK Hynix",
+          "part_number": "HMCG78AGBSA095N"
+        }
+      ]
+    },
+    "gpus": [
+      {
+        "name": "OrayIddDriver Device",
+        "vendor": "Shanghai Best Oray Information Technology Co., Ltd.",
+        "pnp_device_id": "ROOT\\DISPLAY\\0000"
+      },
+      {
+        "name": "NVIDIA GeForce RTX 5080 Laptop GPU",
+        "vendor": "NVIDIA",
+        "pnp_device_id": "PCI\\VEN_10DE&DEV_2C19&SUBSYS_14741462&REV_A1\\87643B2CD42DB04800"
+      }
+    ]
+  },
+  "methods": {
+    "fixed_matrix_vector_multiplication": {
+      "method": "fixed_matrix_vector_multiplication",
+      "display_name": "Fixed Matrix-Vector Multiplication",
+      "generated_at_unix": 1776385307.8526747,
+      "benchmark_elapsed_seconds": 0.03054840000004333,
+      "dataset": {
+        "root_dir": "tmp1gp8a8bj/generated/overrides/8x16",
+        "artifacts": {
+          "autotune_matrix": "tmp1gp8a8bj/generated/overrides/8x16/test_A.bin",
+          "autotune_vector": "tmp1gp8a8bj/generated/overrides/8x16/test_x.bin",
+          "measurement_matrix": "tmp1gp8a8bj/generated/overrides/8x16/test_A.bin",
+          "measurement_vector": "tmp1gp8a8bj/generated/overrides/8x16/test_x.bin"
+        },
+        "shape": {
+          "autotune": {
+            "rows": 8,
+            "cols": 16
+          },
+          "measurement": {
+            "rows": 8,
+            "cols": 16
+          }
+        },
+        "bytes": {
+          "autotune_matrix": 512,
+          "autotune_vector": 64,
+          "measurement_matrix": 512,
+          "measurement_vector": 64
+        },
+        "generated": true
+      },
+      "workload": {
+        "autotune_plan": {
+          "name": "fixed-fmvm-8x16",
+          "rows": 8,
+          "cols": 16,
+          "autotune_repeats": 3,
+          "selection_metric": "autotune_average_latency",
+          "input_dtype": "fp32",
+          "output_dtype": "fp32",
+          "accumulation_precision": "fp32"
+        },
+        "measurement_plan": {
+          "name": "fixed-fmvm-8x16",
+          "rows": 8,
+          "cols": 16,
+          "measurement_repeats": 20,
+          "reported_metric": "measurement_average_latency",
+          "cross_backend_validation": "fp32_tolerance",
+          "full_runtime_measurement": false
+        }
+      },
+      "backends_considered": [
+        "cpu"
+      ],
+      "detected_backends": [
+        "cpu"
+      ],
+      "usable_backends": [
+        "cpu"
+      ],
+      "ranking": [
+        "cpu"
+      ],
+      "best_backend": "cpu",
+      "backends": {
+        "cpu": {
+          "backend": "cpu",
+          "available": true,
+          "device_name": "Intel(R) Core(TM) Ultra 9 275HX",
+          "rank": 1,
+          "autotune_plan": {
+            "autotune_repeats": 3,
+            "measurement_repeats": 20,
+            "trials_run": 5,
+            "search_space": {
+              "workers": [
+                24,
+                12,
+                48,
+                6,
+                96
+              ],
+              "tile_size": [
+                16
+              ]
+            }
+          },
+          "autotune_result": {
+            "wall_clock_latency_seconds": 0.000195833,
+            "effective_gflops": 0.001307234,
+            "checksum": "fnv1a64:58a194d3022d8895",
+            "score": 1000.0
+          },
+          "best_config": {
+            "workers": 6,
+            "requested_workers": 6,
+            "tile_size": 16,
+            "accumulation_precision": "fp32",
+            "autotune_repeats": 3,
+            "measurement_repeats": 20,
+            "trials_run": 5
+          },
+          "best_result": {
+            "wall_clock_latency_seconds": 0.000275785,
+            "effective_gflops": 0.000928259,
+            "checksum": "fnv1a64:58a194d3022d8895",
+            "score": 1000.0
+          },
+          "notes": [
+            "self-contained binary",
+            "prebuilt runner"
+          ]
+        }
+      }
+    }
+  }
+}
