@@ -1,4 +1,4 @@
-﻿"""Runtime task execution for compute-node processors."""
+"""Runtime task execution for compute-node processors."""
 
 from __future__ import annotations
 
@@ -77,7 +77,6 @@ class _Dx12ResidentRunner:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace",
-            encoding="utf-8",
             bufsize=1,
         )
         ready_line = self._read_response_line()
