@@ -1,0 +1,207 @@
+superweb-cluster/
+├── README.md
+│   - Project overview, runtime model, and human-facing quick start
+├── requirements.txt
+│   - Python runtime dependencies
+├── bootstrap.py
+│   - Main entrypoint for launching main-node or compute-node behavior
+├── setup.py
+│   - Local environment setup entrypoint for `.venv` and requirements
+│
+├── app/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── constants.py
+│   ├── logging_setup.py
+│   ├── recovery.py
+│   ├── supervisor.py
+│   └── trace_utils.py
+│   - Application-level support modules
+│
+├── adapters/
+│   ├── __init__.py
+│   ├── audit_log.py
+│   ├── network.py
+│   ├── platform.py
+│   ├── process.py
+│   └── firewall/
+│       ├── __init__.py
+│       ├── linux.py
+│       ├── macos.py
+│       └── windows.py
+│   - Host OS integration helpers
+│
+├── common/
+│   ├── __init__.py
+│   ├── errors.py
+│   ├── float32_codec.py
+│   ├── hardware.py
+│   ├── messages.py
+│   ├── state.py
+│   ├── types.py
+│   └── work_partition.py
+│   - Shared low-level helpers and cluster data models
+│
+├── discovery/
+│   ├── __init__.py
+│   ├── fallback.py
+│   ├── multicast.py
+│   └── pairing.py
+│   - mDNS discovery and manual pairing helpers
+│
+├── wire/
+│   ├── __init__.py
+│   ├── discovery_protocol/
+│   │   └── discovery.py
+│   ├── external_protocol/
+│   │   ├── control_plane.py
+│   │   └── data_plane.py
+│   ├── internal_protocol/
+│   │   ├── common.py
+│   │   ├── control_plane.py
+│   │   ├── control_plane_codec.py
+│   │   ├── data_plane.py
+│   │   ├── data_plane_codec.py
+│   │   └── runtime_transport.py
+│   └── proto/
+│       └── superweb_cluster_runtime.proto
+│   - Discovery, internal protocol, and external protocol helpers plus protobuf schema sources
+│
+├── main_node/
+│   ├── __init__.py
+│   ├── aggregator.py
+│   ├── client_session_service.py
+│   ├── connection_service.py
+│   ├── dispatcher.py
+│   ├── handlers.py
+│   ├── heartbeat.py
+│   ├── heartbeat_service.py
+│   ├── registry.py
+│   ├── request_handler.py
+│   └── runtime.py
+│   ├── runtime_mailbox.py
+│   └── task_exchange.py
+│   - Main-node scheduling, registry, heartbeat coordination, request handling, and runtime orchestration
+│
+├── compute_node/
+│   ├── __init__.py
+│   ├── executor.py
+│   ├── handlers.py
+│   ├── heartbeat.py
+│   ├── performance_summary.py
+│   ├── runtime.py
+│   ├── runtime_services.py
+│   ├── session.py
+│   ├── task_executor.py
+│   - Compute-node runtime orchestration, task execution, and benchmark-summary upload
+│   │
+│   ├── compute_methods/
+│   │   ├── __init__.py
+│   │   ├── README.md
+│   │   └── gemv/
+│   │       ├── __init__.py
+│   │       ├── README.md
+│   │       ├── paths.py
+│   │       ├── cpu/
+│   │       │   ├── macos/
+│   │       │   │   ├── gemv_cpu_macos.cpp
+│   │       │   │   └── build/                    [binary may be tracked]
+│   │       │   └── windows/
+│   │       │       ├── gemv_cpu_windows.cpp
+│   │       │       └── build/                    [exe may be tracked]
+│   │       ├── cuda/
+│   │       │   ├── gemv_cuda_runner.cu
+│   │       │   └── build/                        [exe may be tracked]
+│   │       ├── dx12/
+│   │       │   ├── gemv_dx12_runner.cpp
+│   │       │   └── build/                        [local-only, git-ignored]
+│   │       └── metal/
+│   │           ├── gemv_metal_kernels.metal
+│   │           ├── gemv_metal_runner.mm
+│   │           └── build/                        [binary may be tracked]
+│   │   - Shared compute-method implementations and native runners
+│   │
+│   ├── input_matrix/
+│   │   ├── __init__.py
+│   │   ├── README.md
+│   │   ├── generate.py
+│   │   ├── generator.py
+│   │   ├── spec.py
+│   │   ├── splitmix.py
+│   │   ├── storage.py
+│   │   └── generated/                            [local-only, git-ignored]
+│   │   - Shared deterministic matrix/vector dataset package
+│   │
+│   └── performance_metrics/
+│       ├── README.md
+│       ├── benchmark.py
+│       ├── dataset_runner.py
+│       ├── models.py
+│       ├── path_utils.py
+│       ├── reporting.py
+│       ├── scoring.py
+│       ├── workloads.py
+│       ├── result.json                           [local-only, git-ignored]
+│       └── backends/
+│           ├── __init__.py
+│           ├── cpu_backend.py
+│           ├── cuda_backend.py
+│           ├── dx12_backend.py
+│           ├── metal_backend.py
+│           └── windows_gpu_inventory.py
+│       - Local benchmark orchestration and backend selection
+│
+├── experiments/
+│   └── networking/
+│       ├── README.md
+│       ├── mdns_minimal.py
+│       ├── receiver.py
+│       ├── sender.py
+│       ├── tcp_receiver.py
+│       ├── tcp_sender.py
+│       ├── tcp_speed.py
+│       ├── zmq_receiver.py
+│       └── zmq_sender.py
+│       - Standalone networking experiments outside the main runtime path
+│
+├── docs/
+│   ├── file_system_tree.txt
+│   ├── implementation_plan.txt
+│   ├── implementation_plan_2026-04-15.txt
+│   ├── large_data_transfer_plan_2026-04-15.txt
+│   └── sprint3_plan_2026-04-15.txt
+│   - Human-facing structure notes and planning docs
+│
+├── tests/
+│   ├── __init__.py
+│   ├── test_bootstrap.py
+│   ├── test_compute_node_performance_summary.py
+│   ├── test_compute_node_runtime.py
+│   ├── test_firewall.py
+│   ├── test_main_node_registry.py
+│   ├── test_main_node_runtime.py
+│   ├── test_manual_fallback.py
+│   ├── test_multicast.py
+│   ├── test_network.py
+│   ├── test_performance_matrics.py
+│   ├── test_platform.py
+│   ├── test_protocol.py
+│   ├── test_runtime_protocol.py
+│   ├── test_setup.py
+│   ├── test_supervisor.py
+│   └── test_task_executor.py
+│   - Automated tests
+│
+└── .venv/                                        [local-only, git-ignored]
+    - Project-local virtual environment
+
+Notes:
+- `bootstrap.py` stays at the repository root intentionally so the human entrypoint is obvious.
+- `compute_node/compute_methods/` owns the native implementations; `compute_node/performance_metrics/` measures and ranks them.
+- `wire/` is now split by protocol role: discovery, internal control/data plane, and external control/data plane.
+- On Windows, benchmark backend routing prefers the routine-safe CUDA path when an NVIDIA adapter is present.
+- DX12 source remains in-tree for debugging, but its runtime and benchmark entry points are currently disabled.
+- `compute_node/input_matrix/generated/` and `compute_node/performance_metrics/result.json`
+  are local machine artifacts and should never be committed.
+- DX12 build outputs are local-only by default; CPU/CUDA/Metal prebuilt runners may
+  be tracked when intentionally refreshed.
